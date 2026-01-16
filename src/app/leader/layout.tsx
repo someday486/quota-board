@@ -1,7 +1,7 @@
 import { ReactNode } from 'react';
 
 export const metadata = {
-  title: '팀장 페이지 | 오더프렌즈',
+  title: '팀장 페이지 | QuotaBoard',
 };
 
 export default function LeaderLayout({ children }: { children: ReactNode }) {
