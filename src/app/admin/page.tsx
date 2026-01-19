@@ -33,6 +33,7 @@ type ProfileRow = {
   display_name: string | null;
   role?: string | null;
   is_admin?: boolean | null;
+  leader_group?: number | null;
 };
 
 type LeaderDashRow = {
@@ -40,6 +41,7 @@ type LeaderDashRow = {
   display_name: string;
   today_count: number;
   is_exempt: boolean;
+  leader_group: number | null;
 };
 
 export default function AdminPage() {
@@ -101,6 +103,13 @@ export default function AdminPage() {
   // 개별 예외(한도 무시) - user_id 목록
   const EXEMPT_KEY = 'apply_limit_exempt_user_ids';
   const [exemptUserIds, setExemptUserIds] = useState<string[]>([]);
+
+  // 오늘 지원 가능 조(0=전체, 1=1조, 2=2조)
+  const GROUP_SETTING_KEY = 'active_leader_group';
+  const [activeGroup, setActiveGroup] = useState<number>(0);
+  const [busyActiveGroup, setBusyActiveGroup] = useState(false);
+
+  // 팀장별 소속 조(1/2/null) 변경
   const [leaders, setLeaders] = useState<ProfileRow[]>([]);
   const [todayCountsByUserId, setTodayCountsByUserId] = useState<Record<string, number>>({});
   const [busyToggleExempt, setBusyToggleExempt] = useState<string | null>(null);
@@ -300,11 +309,53 @@ export default function AdminPage() {
     setExemptUserIds(arr.map(String));
   };
 
-  const loadLeaders = async () => {
+  
+  const loadActiveGroup = async () => {
+    const { data, error } = await supabase
+      .from('app_settings')
+      .select('value_int')
+      .eq('key', GROUP_SETTING_KEY)
+      .maybeSingle();
+
+    if (error) {
+      const code = (error as any)?.code;
+      if (code === '42P01') return; // app_settings 없음
+      setErrorMsg(`오늘 지원 조 불러오기 실패: ${error.message}`);
+      return;
+    }
+
+    const v = Number((data as any)?.value_int ?? 0);
+    const safe = Number.isFinite(v) ? Math.max(0, Math.min(2, Math.trunc(v))) : 0;
+    setActiveGroup(safe);
+  };
+
+  const saveActiveGroup = async (v: number) => {
+    pushToast('info', '');
+    if (busyActiveGroup) return;
+
+    const safe = Math.max(0, Math.min(2, Math.trunc(Number(v) || 0)));
+    setBusyActiveGroup(true);
+
+    const { error } = await supabase
+      .from('app_settings')
+      .upsert({ key: GROUP_SETTING_KEY, value_int: safe }, { onConflict: 'key' });
+
+    if (error) {
+      setErrorMsg(`오늘 지원 조 저장 실패: ${error.message}`);
+      setBusyActiveGroup(false);
+      return;
+    }
+
+    setActiveGroup(safe);
+    pushToast('success', '오늘 지원 조 적용 완료');
+    setBusyActiveGroup(false);
+  };
+
+const loadLeaders = async () => {
     // 팀장 목록: profiles에서 is_admin=false 기준
     const { data, error } = await supabase
       .from('profiles')
-      .select('user_id, display_name, role, is_admin')
+      .select('user_id, display_name, role, is_admin, leader_group')
       .eq('is_admin', false)
       .order('display_name', { ascending: true });
 
@@ -735,9 +786,18 @@ const copyBoardAsImage = async () => {
           display_name: name || p.user_id,
           today_count: todayCountsByUserId[p.user_id] ?? 0,
           is_exempt: ex.has(p.user_id),
+          leader_group: (p as any).leader_group ?? null,
         };
       })
       .filter((r) => {
+        // 🔹 검색어 필터
+        // ✅ 오늘 지원 조 필터 (0=전체)
+        if (activeGroup !== 0) {
+          const rg = Number(r.leader_group ?? 0); // 혹시 문자열로 오는 경우 대비
+          if (rg !== activeGroup) return false;
+        }
+
+        // 기존 검색 필터
         if (!q) return true;
         return r.display_name.toLowerCase().includes(q);
       })
@@ -757,7 +817,7 @@ const copyBoardAsImage = async () => {
         return a.display_name.localeCompare(b.display_name, 'ko');
       });
     return rows;
-  }, [leaders, todayCountsByUserId, exemptUserIds, leaderQuery, applyLimit]);
+  }, [leaders, todayCountsByUserId, exemptUserIds, leaderQuery, applyLimit, activeGroup]);
 
   const filteredApplies = useMemo(() => {
     const q = applyQuery.trim().toLowerCase();
@@ -791,7 +851,7 @@ const copyBoardAsImage = async () => {
       // 관리자 권한 체크(프로젝트마다 다를 수 있어서 role/is_admin 둘 다 대응)
       const { data: prof, error: profErr } = await supabase
         .from('profiles')
-        .select('user_id, display_name, role, is_admin')
+        .select('user_id, display_name, role, is_admin, leader_group')
         .eq('user_id', uid)
         .maybeSingle();
 
@@ -821,6 +881,7 @@ const copyBoardAsImage = async () => {
         loadLeaders(),
         loadExemptUserIds(),
         loadTodayCounts(),
+        loadActiveGroup(),
       ]);
 
       if (!alive) return;
@@ -861,7 +922,18 @@ const copyBoardAsImage = async () => {
             setExemptUserIds(arr.map(String));
           }
         )
-        .subscribe();
+        
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'app_settings', filter: `key=eq.${GROUP_SETTING_KEY}` },
+          (payload) => {
+            const row = (payload.new ?? payload.old) as any;
+            const v = Number(row?.value_int ?? 0);
+            const safe = Number.isFinite(v) ? Math.max(0, Math.min(2, Math.trunc(v))) : 0;
+            setActiveGroup(safe);
+          }
+        )
+.subscribe();
 
       setChecking(false);
     };
@@ -1177,8 +1249,39 @@ const copyBoardAsImage = async () => {
                 </button>
               </div>
 
-              {/* 안내 텍스트 */}
-              <div style={{ fontSize: 12, color: '#666', whiteSpace: 'nowrap' }}>이름 · 오늘 지원 · 예외</div>
+              {/* 오늘 지원 조 */}
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  paddingLeft: 10,
+                  borderLeft: '1px solid #e5e7eb',
+                }}
+              >
+                <span style={{ fontSize: 12, fontWeight: 800, color: '#64748b' }}>오늘 지원 조</span>
+
+                <select
+                  value={String(activeGroup)}
+                  onChange={(e) => saveActiveGroup(Number(e.target.value))}
+                  disabled={busyActiveGroup}
+                  style={{
+                    height: 28,
+                    borderRadius: 8,
+                    border: '1px solid #d1d5db',
+                    fontSize: 12,
+                    fontWeight: 900,
+                    padding: '0 8px',
+                    background: busyActiveGroup ? '#f8fafc' : '#ffffff',
+                    cursor: busyActiveGroup ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  <option value="0">전체</option>
+                  <option value="1">1조</option>
+                  <option value="2">2조</option>
+                </select>
+              </div>
+
             </div>
           </div>
 
@@ -1273,6 +1376,20 @@ const copyBoardAsImage = async () => {
                           </span>
                         )}
 
+                        <span
+                          style={{
+                            fontSize: 11,
+                            padding: '2px 6px',
+                            borderRadius: 999,
+                            background: '#e0f2fe',
+                            border: '1px solid #bae6fd',
+                            fontWeight: 900,
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          {p.leader_group === 1 ? '1조' : p.leader_group === 2 ? '2조' : '미지정'}
+                        </span>
+
                         {isBlocked && (
                           <span
                             style={{
@@ -1291,6 +1408,7 @@ const copyBoardAsImage = async () => {
                       </div>
 
                       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+
                         <div
                           style={{
                             fontSize: 12,

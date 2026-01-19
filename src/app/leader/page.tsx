@@ -33,6 +33,7 @@ type ProfileRow = {
   display_name: string | null;
   role?: string | null;
   is_admin?: boolean | null;
+  leader_group?: number | null;
 };
 
 type AppSettingRow = {
@@ -52,6 +53,8 @@ const REGION_COLOR: Record<string, string> = {
 
 const LIMIT_SETTING_KEY = 'apply_limit_per_user_per_day';
 const EXEMPT_SETTING_KEY = 'apply_limit_exempt_user_ids';
+const GROUP_SETTING_KEY = 'active_leader_group'; // 0=전체, 1=1조, 2=2조
+const ACTIVE_GROUP_KEY = 'active_leader_group';
 
 function getLocalDayRangeISO() {
   const start = new Date();
@@ -89,6 +92,10 @@ export default function LeaderPage() {
   const [myTodayCount, setMyTodayCount] = useState<number>(0);
   // 개별 예외(한도 무시)
   const [exemptUserIds, setExemptUserIds] = useState<string[]>([]);
+
+  // 오늘 지원 가능 조(0=전체,1=1조,2=2조) + 내 소속 조
+  const [activeGroup, setActiveGroup] = useState<number>(0);
+  const [myGroup, setMyGroup] = useState<number | null>(null);
 
   const showToast = (type: ToastType, text: string) => {
     setToast({ type, text });
@@ -189,6 +196,30 @@ export default function LeaderPage() {
     setExemptUserIds(arr.map(String));
   };
 
+  const loadActiveGroup = async () => {
+    const { data, error } = await supabase
+      .from('app_settings')
+      .select('key, value_int')
+      .eq('key', GROUP_SETTING_KEY)
+      .maybeSingle();
+
+    if (error) {
+      console.warn('[loadActiveGroup] error:', error.message);
+      return;
+    }
+
+    if (!data) {
+      setActiveGroup(0);
+      return;
+    }
+
+    const row = data as AppSettingRow;
+    const v = Number(row.value_int ?? 0);
+    const safe = Number.isFinite(v) ? Math.max(0, Math.min(2, Math.trunc(v))) : 0;
+    setActiveGroup(safe);
+  };
+
+
   const loadMyTodayCount = async (uid: string) => {
     const { startISO, endISO } = getLocalDayRangeISO();
 
@@ -226,6 +257,24 @@ export default function LeaderPage() {
     return perPersonLimit > 0 && myTodayCount >= perPersonLimit;
   }, [perPersonLimit, myTodayCount, isExempt]);
 
+  const activeGroupLabel = useMemo(() => {
+    if (activeGroup === 1) return '1조';
+    if (activeGroup === 2) return '2조';
+    return '전체';
+  }, [activeGroup]);
+
+  const myGroupLabel = useMemo(() => {
+    if (myGroup === 1) return '1조';
+    if (myGroup === 2) return '2조';
+    return '미지정';
+  }, [myGroup]);
+
+  const groupBlocked = useMemo(() => {
+    if (activeGroup === 0) return false;
+    if (!myGroup) return true;
+    return myGroup !== activeGroup;
+  }, [activeGroup, myGroup]);
+
   const apply = async (regionId: string) => {
     clearError();
     if (busyRegionId) return;
@@ -233,6 +282,11 @@ export default function LeaderPage() {
     const blocked = !isExempt && perPersonLimit > 0 && myTodayCount >= perPersonLimit;
     if (blocked) {
       setErrorMsg('오늘 지원 가능 횟수가 0명입니다. (공통 1인당 하루 한도 도달)');
+      return;
+    }
+
+    if (groupBlocked) {
+      setErrorMsg(`오늘은 ${activeGroupLabel}만 지원 가능합니다. (내 소속: ${myGroupLabel})`);
       return;
     }
 
@@ -300,7 +354,7 @@ export default function LeaderPage() {
 
       const { data: prof, error: profErr } = await supabase
         .from('profiles')
-        .select('user_id, display_name, role, is_admin')
+        .select('user_id, display_name, role, is_admin, leader_group')
         .eq('user_id', uid)
         .maybeSingle();
 
@@ -325,9 +379,10 @@ export default function LeaderPage() {
       }
 
       setLeaderName(p.display_name ?? '팀장');
+      setMyGroup(p.leader_group ?? null);
 
       await loadRegions();
-      await Promise.all([loadLimit(), loadExempt(), loadStatus(), loadMyApplies(uid), loadMyTodayCount(uid)]);
+      await Promise.all([loadLimit(), loadExempt(), loadActiveGroup(), loadStatus(), loadMyApplies(uid), loadMyTodayCount(uid)]);
 
       if (!alive) return;
 
@@ -350,7 +405,13 @@ export default function LeaderPage() {
           const ok = (payload?.old as any)?.key;
           if (nk === LIMIT_SETTING_KEY || ok === LIMIT_SETTING_KEY) loadLimit();
           if (nk === EXEMPT_SETTING_KEY || ok === EXEMPT_SETTING_KEY) loadExempt();
+          if (nk === GROUP_SETTING_KEY || ok === GROUP_SETTING_KEY) loadActiveGroup();
         })
+        .on(
+            'postgres_changes',
+            { event: '*', schema: 'public', table: 'app_settings', filter: `key=eq.${ACTIVE_GROUP_KEY}` },
+            () => loadActiveGroup()
+          )        
         .subscribe();
 
       setChecking(false);
@@ -447,6 +508,34 @@ export default function LeaderPage() {
           </div>
         )}
 
+        {/* 오늘 지원 조 카드 */}
+        <div
+          style={{
+            ...card,
+            marginTop: 16,
+            borderColor: groupBlocked ? '#fecaca' : '#e5e7eb',
+            background: groupBlocked ? '#fff1f2' : '#ffffff',
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+            <div>
+              <div style={{ fontSize: 12, color: '#64748b', fontWeight: 900 }}>지방 콜 운영 · 오늘 지원 가능 조</div>
+              <div style={{ marginTop: 6, fontSize: 28, fontWeight: 950, letterSpacing: -0.3 }}>{activeGroupLabel}</div>
+              <div style={{ marginTop: 4, fontSize: 13, color: '#475569', fontWeight: 800 }}>
+                내 소속: <b style={{ color: '#0f172a' }}>{myGroupLabel}</b>
+              </div>
+            </div>
+
+            {groupBlocked ? <div style={badgeDanger}>지원 불가</div> : <div style={badgeInfo}>지원 가능</div>}
+          </div>
+
+          {groupBlocked && (
+            <div style={{ marginTop: 10, fontSize: 15, fontWeight: 950, color: '#b91c1c' }}>
+              오늘은 <b>{activeGroupLabel}</b>만 지원 가능합니다. (내 소속: {myGroupLabel})
+            </div>
+          )}
+        </div>
+
         {/* 한도 카드 */}
         <div
           style={{
@@ -521,7 +610,7 @@ export default function LeaderPage() {
                 const bg = REGION_COLOR[r.region_name] ?? '#fff';
                 const closed = r.is_closed || r.capacity_remaining <= 0 || r.capacity_total <= 0;
                 const isBusy = busyRegionId === r.region_id;
-                const disabled = closed || isBusy || limitBlocked;
+                const disabled = closed || isBusy || limitBlocked || groupBlocked;
                 if (r.capacity_total === 0) return null;
 
                 return (
@@ -559,7 +648,13 @@ export default function LeaderPage() {
                           }
                         }}
                         placeholder={
-                          closed ? '마감' : limitBlocked ? '오늘 한도 도달' : '기업명 입력 (Enter 지원)'
+                          closed
+                            ? '마감'
+                            : groupBlocked
+                              ? `오늘은 ${activeGroupLabel}만 지원 가능`
+                              : limitBlocked
+                                ? '오늘 한도 도달'
+                                : '기업명 입력 (Enter 지원)'
                         }
                         disabled={disabled}
                         style={{
@@ -590,7 +685,7 @@ export default function LeaderPage() {
                           cursor: disabled ? 'not-allowed' : 'pointer',
                         }}
                       >
-                        {isBusy ? '처리중…' : limitBlocked ? '한도' : closed ? '마감' : '지원'}
+                        {isBusy ? '처리중…' : groupBlocked ? '불가' : limitBlocked ? '한도' : closed ? '마감' : '지원'}
                       </button>
                     </td>
                   </tr>
