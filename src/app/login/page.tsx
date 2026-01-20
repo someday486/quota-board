@@ -94,7 +94,7 @@ export default function LoginPage() {
           <div className={styles.brandRow}>
             <div className={styles.mark} aria-hidden />
             <div>
-              <div className={styles.brand}>QuotaBorad</div>
+              <div className={styles.brand}>QuotaBoard</div>
               <div className={styles.subtitle}>관리자 / 팀장 전용</div>
             </div>
           </div>

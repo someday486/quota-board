@@ -97,6 +97,28 @@ export default function LeaderPage() {
   const [activeGroup, setActiveGroup] = useState<number>(0);
   const [myGroup, setMyGroup] = useState<number | null>(null);
 
+  // 가이드(사용 방법) 접기/펼치기: 기본=펼침, 사용자 선택 저장
+  const GUIDE_KEY = "qb_leader_guide_open";
+  const [guideOpen, setGuideOpen] = useState<boolean>(true);
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(GUIDE_KEY);
+      if (saved === "0") setGuideOpen(false);
+      if (saved === "1") setGuideOpen(true);
+    } catch {}
+  }, []);
+
+  const toggleGuide = () => {
+    setGuideOpen((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem(GUIDE_KEY, next ? "1" : "0");
+      } catch {}
+      return next;
+    });
+  };
+
   const showToast = (type: ToastType, text: string) => {
     setToast({ type, text });
     if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
@@ -274,6 +296,13 @@ export default function LeaderPage() {
     if (!myGroup) return true;
     return myGroup !== activeGroup;
   }, [activeGroup, myGroup]);
+
+  // 상태 요약 카드 톤(정상/제한) — 외곽은 아주 연한 경고, 내부 카드는 흰 배경 + 경고 테두리로 조화
+  const isAlert = groupBlocked || limitBlocked;
+  const wrapBg = isAlert ? '#fff7f7' : '#ffffff';
+  const wrapBorder = isAlert ? '#fecaca' : '#e5e7eb';
+  const innerBg = isAlert ? '#ffffff' : '#f8fafc';
+  const innerBorder = isAlert ? '#fecaca' : '#eef2f7';
 
   const apply = async (regionId: string) => {
     clearError();
@@ -508,87 +537,119 @@ export default function LeaderPage() {
           </div>
         )}
 
-        {/* 오늘 지원 조 카드 */}
-        <div
-          style={{
-            ...card,
-            marginTop: 16,
-            borderColor: groupBlocked ? '#fecaca' : '#e5e7eb',
-            background: groupBlocked ? '#fff1f2' : '#ffffff',
-          }}
-        >
-          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+        {/* 사용 방법(가이드) 카드: 기본=펼침, 접기 가능 */}
+        <div style={{ ...card, marginTop: 16 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
             <div>
-              <div style={{ fontSize: 12, color: '#64748b', fontWeight: 900 }}>지방 콜 운영 · 오늘 지원 가능 조</div>
-              <div style={{ marginTop: 6, fontSize: 28, fontWeight: 950, letterSpacing: -0.3 }}>{activeGroupLabel}</div>
-              <div style={{ marginTop: 4, fontSize: 13, color: '#475569', fontWeight: 800 }}>
-                내 소속: <b style={{ color: '#0f172a' }}>{myGroupLabel}</b>
+              <div style={{ fontSize: 13, color: '#64748b', fontWeight: 950 }}>사용 방법</div>
+              <div style={{ marginTop: 6, fontSize: 18, fontWeight: 950, letterSpacing: -0.2 }}>
+                지역 선택 → 기업명 입력 → Enter(또는 지원 버튼)
+              </div>
+              <div style={{ marginTop: 4, fontSize: 14, color: '#475569', fontWeight: 850, lineHeight: 1.6 }}>
+                오늘 지원 가능한 조 / 하루 지원 가능 횟수에 따라 지원이 제한될 수 있습니다.
               </div>
             </div>
 
-            {groupBlocked ? <div style={badgeDanger}>지원 불가</div> : <div style={badgeInfo}>지원 가능</div>}
+            <button
+              type="button"
+              onClick={toggleGuide}
+              aria-expanded={guideOpen}
+              style={guideToggleBtn}
+            >
+              {guideOpen ? '접기 ▲' : '펼치기 ▼'}
+            </button>
           </div>
 
-          {groupBlocked && (
-            <div style={{ marginTop: 10, fontSize: 15, fontWeight: 950, color: '#b91c1c' }}>
-              오늘은 <b>{activeGroupLabel}</b>만 지원 가능합니다. (내 소속: {myGroupLabel})
+          {guideOpen && (
+            <div style={{ marginTop: 12, fontSize: 15, color: '#0f172a', fontWeight: 850, lineHeight: 1.7 }}>
+              <div style={{ marginBottom: 8 }}>
+                <b>1)</b> 아래 표에서 <b>지역</b>을 확인하고, <b>기업명</b>을 입력합니다.
+              </div>
+              <div style={{ marginBottom: 8 }}>
+                <b>2)</b> 키보드 <b>Enter</b>를 누르거나 오른쪽 <b>지원</b> 버튼을 누릅니다.
+              </div>
+              <div style={{ marginBottom: 10 }}>
+                <b>3)</b> 지원이 완료되면 아래 <b>내 지원 목록</b>에 바로 표시됩니다.
+              </div>
+
             </div>
           )}
         </div>
 
-        {/* 한도 카드 */}
+        {/* 오늘 상태 요약 카드 (조 + 하루 한도 통합) */}
         <div
           style={{
             ...card,
             marginTop: 16,
-            borderColor: limitBlocked ? '#fecaca' : '#e5e7eb',
-            background: limitBlocked ? '#fff1f2' : '#ffffff',
+            borderColor: wrapBorder,
+            background: wrapBg,
           }}
         >
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
             <div>
-              <div style={{ fontSize: 12, color: '#64748b', fontWeight: 900 }}>공통 정책: 1인당 하루 지원 한도</div>
-              <div style={{ marginTop: 6, fontSize: 28, fontWeight: 950, letterSpacing: -0.3 }}>
-                오늘 지원 가능: {remainingTodayLabel}
+              <div style={{ fontSize: 13, color: '#64748b', fontWeight: 950 }}>오늘 상태 요약</div>
+              <div style={{ marginTop: 6, fontSize: 20, fontWeight: 950, letterSpacing: -0.2 }}>
+                {groupBlocked || limitBlocked ? '현재 지원이 제한되어 있습니다.' : '현재 지원 가능합니다.'}
               </div>
-              <div style={{ marginTop: 4, fontSize: 13, color: '#475569', fontWeight: 800 }}>
-                {isExempt ? (
-                  <span>
-                    예외 적용 중 · 오늘 사용 <b>{myTodayCount}</b>
+            </div>
+
+            {groupBlocked || limitBlocked ? <div style={badgeDanger}>지원 제한</div> : <div style={badgeInfo}>정상</div>}
+          </div>
+
+          <div style={{ marginTop: 12, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            {/* 오늘 지원 가능 조 (1줄 압축) */}
+            <div style={{ ...subCard, background: innerBg, borderColor: innerBorder }}>
+              <div style={{ fontSize: 13, color: '#64748b', fontWeight: 950 }}>오늘 지원 가능 조</div>
+              <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                <div style={{ fontSize: 18, fontWeight: 950, letterSpacing: -0.2 }}>
+                  오늘 지원 가능 조: <b>{activeGroupLabel}</b>
+                  <span style={{ marginLeft: 6, fontSize: 15, color: '#475569', fontWeight: 850 }}>
+                    (내 소속: <b style={{ color: '#0f172a' }}>{myGroupLabel}</b>)
                   </span>
-                ) : perPersonLimit > 0 ? (
-                  <span>
-                    오늘 사용 <b>{myTodayCount}</b> / 한도 <b>{perPersonLimit}</b>
+                </div>
+                {groupBlocked ? <span style={pillDangerInline}>지원 불가</span> : <span style={pillInfoInline}>지원 가능</span>}
+              </div>
+            </div>
+
+            {/* 하루 지원 가능 횟수 (1줄 압축) */}
+            <div style={{ ...subCard, background: innerBg, borderColor: innerBorder }}>
+              <div style={{ fontSize: 13, color: '#64748b', fontWeight: 950 }}>하루 지원 가능 횟수</div>
+              <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                <div style={{ fontSize: 18, fontWeight: 950, letterSpacing: -0.2 }}>
+                  오늘 지원 가능: <b>{remainingTodayLabel}</b>
+                  <span style={{ marginLeft: 6, fontSize: 15, color: '#475569', fontWeight: 850 }}>
+                    (
+                    {isExempt ? (
+                      <>
+                        예외 · 오늘 사용 <b>{myTodayCount}</b>
+                      </>
+                    ) : perPersonLimit > 0 ? (
+                      <>
+                        오늘 사용 <b>{myTodayCount}</b> / 한도 <b>{perPersonLimit}</b>
+                      </>
+                    ) : (
+                      <>무제한</>
+                    )}
+                    )
                   </span>
+                </div>
+                {limitBlocked ? (
+                  <span style={pillDangerInline}>한도 도달</span>
+                ) : isExempt ? (
+                  <span style={pillWarnInline}>예외</span>
                 ) : (
-                  <span>현재: 무제한</span>
+                  <span style={pillInfoInline}>{perPersonLimit > 0 ? '정상' : '무제한'}</span>
                 )}
               </div>
             </div>
-
-            {limitBlocked ? (
-              <div style={badgeDanger}>한도 도달</div>
-            ) : isExempt ? (
-              <div style={badgeWarning}>예외</div>
-            ) : perPersonLimit > 0 ? (
-              <div style={badgeInfo}>정상</div>
-            ) : (
-              <div style={badgeInfo}>무제한</div>
-            )}
           </div>
-
-          {limitBlocked && (
-            <div style={{ marginTop: 10, fontSize: 14, fontWeight: 900, color: '#b91c1c' }}>
-              오늘 한도에 도달했습니다. 추가 지원은 불가합니다.
-            </div>
-          )}
         </div>
 
         {/* 지역별 TO 카드 */}
         <div style={{ ...card, marginTop: 16, padding: 0, overflow: 'hidden' }}>
           <div style={cardHeader}>
             <div>
-              <div style={cardTitle}>지역별 TO</div>
+              <div style={cardTitle}>지역별 배정 가능 수량(TO)</div>
               <div style={cardSubTitle}>실시간 현황 · 기업명 입력 후 지원</div>
             </div>
             <div style={{ fontSize: 12, color: '#64748b', fontWeight: 800 }}>Enter로 빠른 지원</div>
@@ -598,8 +659,8 @@ export default function LeaderPage() {
             <thead>
               <tr style={{ background: '#f8fafc' }}>
                 <th style={{ ...thBig, textAlign: 'center' }}>지역</th>
-                <th style={{ ...th, textAlign: 'right' }}>총 TO</th>
-                <th style={{ ...th, textAlign: 'right' }}>잔여</th>
+                <th style={{ ...th, textAlign: 'right' }}>총 배정(TO)</th>
+                <th style={{ ...th, textAlign: 'right' }}>남은 수량</th>
                 <th style={{ ...th, textAlign: 'center' }}>상태</th>
                 <th style={tdBig}>기업명</th>
                 <th style={{ ...th, textAlign: 'center' }}>지원</th>
@@ -886,6 +947,67 @@ const badgeWarning: React.CSSProperties = {
 
 const badgeDanger: React.CSSProperties = {
   alignSelf: 'flex-start',
+  padding: '6px 10px',
+  borderRadius: 999,
+  border: '1px solid #fecaca',
+  background: '#fff1f2',
+  color: '#991b1b',
+  fontWeight: 950,
+  fontSize: 12,
+};
+
+const guideToggleBtn: React.CSSProperties = {
+  border: '1px solid #e5e7eb',
+  background: '#ffffff',
+  borderRadius: 999,
+  padding: '10px 14px',
+  fontWeight: 950,
+  cursor: 'pointer',
+  fontSize: 14,
+  color: '#0f172a',
+  whiteSpace: 'nowrap',
+};
+
+const guideNoteBox: React.CSSProperties = {
+  marginTop: 10,
+  padding: 12,
+  borderRadius: 14,
+  background: '#f8fafc',
+  border: '1px solid #e2e8f0',
+  color: '#0f172a',
+};
+
+const subCard: React.CSSProperties = {
+  border: '1px solid #eef2f7',
+  borderRadius: 16,
+  padding: 12,
+  background: '#f8fafc',
+};
+
+const pillInfoInline: React.CSSProperties = {
+  display: 'inline-block',
+  padding: '6px 10px',
+  borderRadius: 999,
+  border: '1px solid #bae6fd',
+  background: '#f0f9ff',
+  color: '#0c4a6e',
+  fontWeight: 950,
+  fontSize: 12,
+};
+
+const pillWarnInline: React.CSSProperties = {
+  display: 'inline-block',
+  padding: '6px 10px',
+  borderRadius: 999,
+  border: '1px solid #fde68a',
+  background: '#fffbeb',
+  color: '#92400e',
+  fontWeight: 950,
+  fontSize: 12,
+};
+
+const pillDangerInline: React.CSSProperties = {
+  display: 'inline-block',
   padding: '6px 10px',
   borderRadius: 999,
   border: '1px solid #fecaca',
