@@ -21,12 +21,19 @@ const csv = fs.readFileSync('./users.csv', 'utf8');
 const rows = parse(csv, { columns: true, skip_empty_lines: true });
 
 for (const r of rows) {
-  const email = String(r.email).trim();
-  const password = String(r.password).trim();
+  // 🔽 모든 알파벳 소문자 처리
+  const email = String(r.email).trim().toLowerCase();
+  const password = String(r.password).trim().toLowerCase();
   const display_name = String(r.display_name ?? '').trim();
-  const role = String(r.role ?? 'leader').trim();
-  const is_admin = String(r.is_admin ?? 'false').trim().toLowerCase() === 'true';
+  const role = String(r.role ?? 'leader').trim().toLowerCase();
+  const is_admin =
+    String(r.is_admin ?? 'false').trim().toLowerCase() === 'true';
 
+  const leader_group = r.leader_group
+    ? String(r.leader_group).trim().toLowerCase()
+    : null;
+
+  // 1️⃣ Auth 유저 생성
   const { data, error } = await supabaseAdmin.auth.admin.createUser({
     email,
     password,
@@ -38,9 +45,27 @@ for (const r of rows) {
     },
   });
 
-  if (error) {
-    console.error('❌ FAIL:', email, error.message);
+  if (error || !data?.user) {
+    console.error('❌ FAIL (auth):', email, error?.message);
+    continue;
+  }
+
+  const userId = data.user.id;
+
+  // 2️⃣ public.profiles 업데이트 (leader_group 포함)
+  const { error: profileError } = await supabaseAdmin
+    .from('profiles')
+    .update({
+      display_name,
+      role,
+      is_admin,
+      leader_group,
+    })
+    .eq('user_id', userId); // ✅ profiles 키가 user_id인 구조일 때
+
+  if (profileError) {
+    console.error('❌ FAIL (profile update):', email, profileError.message);
   } else {
-    console.log('✅ OK:', email, data.user?.id);
+    console.log('✅ OK:', email, 'leader_group =', leader_group);
   }
 }
