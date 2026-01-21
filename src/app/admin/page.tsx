@@ -44,11 +44,33 @@ type LeaderDashRow = {
   leader_group: number | null;
 };
 
+type CallRecordingRow = {
+  id: string;
+  application_id: string;
+  file_path: string;
+  file_name: string | null;
+  content_type: string | null;
+  size_bytes: number | null;
+  uploaded_at: string;
+  reviewed: boolean;
+  reviewed_at: string | null;
+  reviewed_by: string | null;
+};
+
 export default function AdminPage() {
   const router = useRouter();
   const boardRef = useRef<HTMLDivElement | null>(null);
   const leftTOCardRef = useRef<HTMLDivElement | null>(null);
   const [leftTOCardHeight, setLeftTOCardHeight] = useState<number | null>(null);
+  const [adminUserId, setAdminUserId] = useState<string>('');
+
+  // 녹취(업로드/재생/검수) - applications_live.id 기준 1:1
+  const [recordingsByAppId, setRecordingsByAppId] = useState<Record<string, CallRecordingRow | null>>({});
+  const [uploadingByAppId, setUploadingByAppId] = useState<Record<string, boolean>>({});
+  const [audioUrlByAppId, setAudioUrlByAppId] = useState<Record<string, string>>({});
+  const [dragOverAppId, setDragOverAppId] = useState<string | null>(null);
+  const [openPlayerAppId, setOpenPlayerAppId] = useState<string | null>(null);
+
 
   useEffect(() => {
     const el = leftTOCardRef.current;
@@ -175,6 +197,37 @@ export default function AdminPage() {
     });
   };
 
+
+const loadRecordings = async (appIds: string[]) => {
+  // appIds가 일부만 넘어와도 기존 맵을 날리지 않고, 해당 id들만 갱신합니다.
+  if (!appIds || appIds.length === 0) {
+    setRecordingsByAppId({});
+    return;
+  }
+
+  const { data, error } = await supabase
+    .from('call_recordings')
+    .select('id, application_id, file_path, file_name, content_type, size_bytes, uploaded_at, reviewed, reviewed_at, reviewed_by')
+    .in('application_id', appIds);
+
+  if (error) {
+    // 녹취는 “부가 기능”이라 치명 오류로 막지 말고 경고만
+    console.warn('[loadRecordings] error:', error.message);
+    return;
+  }
+
+  const map: Record<string, CallRecordingRow | null> = {};
+  for (const id of appIds) map[id] = null;
+
+  for (const r of (data as CallRecordingRow[]) ?? []) {
+    map[r.application_id] = r;
+  }
+
+  setRecordingsByAppId((prev) => ({ ...prev, ...map }));
+};
+
+
+
   const loadApplies = async () => {
     // applications_live에는 region_name이 없으니, regionsMap으로 표시
     const { data, error } = await supabase
@@ -187,9 +240,173 @@ export default function AdminPage() {
       setErrorMsg(error.message);
       return;
     }
-    setApplies((data as LiveApplyRow[]) ?? []);
+
+    const list = (data as LiveApplyRow[]) ?? [];
+    setApplies(list);
+
+    // ✅ 녹취(부가 기능)도 같이 로드
+    await loadRecordings(list.map((x) => x.id));
   };
 
+
+const pickExt = (name: string) => {
+  const i = name.lastIndexOf('.');
+  if (i < 0) return '';
+  const ext = name.slice(i).toLowerCase();
+  if (!/^\.[a-z0-9]{1,8}$/.test(ext)) return '';
+  return ext;
+};
+
+const handleUploadRecording = async (applicationId: string, file: File) => {
+  if (!file) return;
+
+  // 너무 큰 파일 방지(현장 운영 기준: 200MB)
+  const maxMB = 200;
+  if (file.size > maxMB * 1024 * 1024) {
+    alert(`파일이 너무 큽니다. (${maxMB}MB 이하로 업로드해주세요)`);
+    return;
+  }
+
+  setUploadingByAppId((p) => ({ ...p, [applicationId]: true }));
+
+  try {
+    const ext = pickExt(file.name);
+    const path = `applications_live/${applicationId}/recording${ext || ''}`;
+
+    const up = await supabase.storage
+      .from('call_recordings')
+      .upload(path, file, { upsert: true, contentType: file.type });
+
+    if (up.error) {
+      alert(`업로드 실패: ${up.error.message}`);
+      return;
+    }
+
+    // 1지원(=applications_live 1건)당 1녹취: application_id UNIQUE로 upsert
+    const { error: upsertErr } = await supabase
+      .from('call_recordings')
+      .upsert(
+        {
+          application_id: applicationId,
+          file_path: path,
+          file_name: file.name,
+          content_type: file.type,
+          size_bytes: file.size,
+          reviewed: false,
+          reviewed_at: null,
+          reviewed_by: null,
+        },
+        { onConflict: 'application_id' },
+      );
+
+    if (upsertErr) {
+      alert(`DB 저장 실패: ${upsertErr.message}`);
+      return;
+    }
+
+    // 기존 재생 URL이 있으면 만료될 수 있으니 제거
+    setAudioUrlByAppId((p) => {
+      const next = { ...p };
+      delete next[applicationId];
+      return next;
+    });
+
+    await loadRecordings([applicationId]);
+    pushToast('success', '녹취 업로드 완료');
+  } finally {
+    setUploadingByAppId((p) => ({ ...p, [applicationId]: false }));
+  }
+};
+
+const handlePlayRecording = async (applicationId: string) => {
+  const rec = recordingsByAppId[applicationId];
+  if (!rec) return;
+
+  // 같은 항목에서 다시 누르면 접기
+  if (openPlayerAppId === applicationId) {
+    setOpenPlayerAppId(null);
+    return;
+  }
+
+  setOpenPlayerAppId(applicationId);
+
+  // 이미 signed url이 있으면 그대로 사용
+  if (audioUrlByAppId[applicationId]) return;
+
+  const { data, error } = await supabase.storage
+    .from('call_recordings')
+    .createSignedUrl(rec.file_path, 60 * 30); // 30분
+
+  if (error || !data?.signedUrl) {
+    alert(`재생 URL 생성 실패: ${error?.message ?? 'unknown'}`);
+    return;
+  }
+
+  setAudioUrlByAppId((p) => ({ ...p, [applicationId]: data.signedUrl }));
+};
+
+const handleDeleteRecording = async (applicationId: string) => {
+  const rec = recordingsByAppId[applicationId];
+  if (!rec) return;
+
+  const ok = confirm('이 지원 건의 녹취 파일을 삭제할까요? (되돌릴 수 없습니다)');
+  if (!ok) return;
+
+  try {
+    // 1) Storage 파일 삭제
+    const rm = await supabase.storage.from('call_recordings').remove([rec.file_path]);
+    if (rm.error) {
+      alert(`스토리지 삭제 실패: ${rm.error.message}`);
+      return;
+    }
+
+    // 2) DB row 삭제
+    const { error } = await supabase.from('call_recordings').delete().eq('id', rec.id);
+    if (error) {
+      alert(`DB 삭제 실패: ${error.message}`);
+      return;
+    }
+
+    // 로컬 상태 정리
+    setRecordingsByAppId((p) => ({ ...p, [applicationId]: null }));
+    setAudioUrlByAppId((p) => {
+      const next = { ...p };
+      delete next[applicationId];
+      return next;
+    });
+    if (openPlayerAppId === applicationId) setOpenPlayerAppId(null);
+
+    pushToast('success', '녹취 삭제 완료');
+  } catch (e: any) {
+    alert(`삭제 중 오류: ${e?.message ?? String(e)}`);
+  }
+};
+
+const handleToggleReviewed = async (applicationId: string, checked: boolean) => {
+  const rec = recordingsByAppId[applicationId];
+  if (!rec) {
+    alert('먼저 녹취 파일을 업로드해주세요.');
+    return;
+  }
+
+  const payload = checked
+    ? { reviewed: true, reviewed_at: new Date().toISOString(), reviewed_by: adminUserId }
+    : { reviewed: false, reviewed_at: null, reviewed_by: null };
+
+  const { error } = await supabase.from('call_recordings').update(payload).eq('id', rec.id);
+
+  if (error) {
+    alert(`검수 상태 저장 실패: ${error.message}`);
+    return;
+  }
+
+  setRecordingsByAppId((p) => ({
+    ...p,
+    [applicationId]: { ...rec, ...payload } as CallRecordingRow,
+  }));
+
+  pushToast('success', checked ? '검수 완료로 표시했습니다.' : '검수 완료 표시를 해제했습니다.');
+};
   const saveOneTotal = async (regionId: string) => {
     pushToast('info', '');
     const v = Number(totalByRegionId[regionId] ?? 0);
@@ -460,24 +677,56 @@ const loadLeaders = async () => {
     pushToast('info', '');
     if (busyReset) return;
 
-    const ok = confirm('초기화하면 모든 지역 총 TO가 0이 되고, 지원 목록이 전부 삭제됩니다. 진행할까요?');
+    const ok = confirm('초기화하면 모든 지역 총 TO가 0이 되고, 지원 목록/녹취 파일이 전부 삭제됩니다. 진행할까요?');
     if (!ok) return;
 
     setBusyReset(true);
 
-    const { error } = await supabase.rpc('admin_reset_live');
-    if (error) {
-      setErrorMsg(`초기화 실패: ${error.message}`);
+    try {
+      // 1) 녹취 파일(Storage) 먼저 삭제
+      const { data: recs, error: recErr } = await supabase
+        .from('call_recordings')
+        .select('file_path');
+
+      if (recErr) {
+        setErrorMsg(`녹취 목록 조회 실패: ${recErr.message}`);
+        return;
+      }
+
+      const paths = (recs as any[] | null)?.map((r) => String(r.file_path ?? '')).filter(Boolean) ?? [];
+
+      if (paths.length > 0) {
+        const { error: rmErr } = await supabase.storage.from('call_recordings').remove(paths);
+        if (rmErr) {
+          setErrorMsg(`녹취 파일 삭제 실패: ${rmErr.message}`);
+          return;
+        }
+      }
+
+      // 2) DB 초기화 (TO=0 + 지원목록 삭제 등)
+      const { error } = await supabase.rpc('admin_reset_live');
+      if (error) {
+        setErrorMsg(`초기화 실패: ${error.message}`);
+        return;
+      }
+
+      // 3) 로컬 오디오 URL 정리(메모리 누수 방지)
+      setAudioUrlByAppId((prev) => {
+        for (const url of Object.values(prev)) {
+          try {
+            URL.revokeObjectURL(url);
+          } catch {}
+        }
+        return {};
+      });
+
+      pushToast('success', '초기화 완료');
+      await loadStatus();
+      await loadApplies();
+    } finally {
       setBusyReset(false);
-      return;
     }
-
-    setBusyReset(false);
-    pushToast('success', '초기화 완료');
-    await loadStatus();
-    await loadApplies();
   };
-
 const copyBoardAsImage = async () => {
   pushToast('info', '');
   if (busyCopyBoard) return;
@@ -847,6 +1096,7 @@ const copyBoardAsImage = async () => {
       }
 
       const uid = userRes.user.id;
+      setAdminUserId(uid);
 
       // 관리자 권한 체크(프로젝트마다 다를 수 있어서 role/is_admin 둘 다 대응)
       const { data: prof, error: profErr } = await supabase
@@ -896,6 +1146,10 @@ const copyBoardAsImage = async () => {
           loadApplies();
           loadStatus();
           loadTodayCounts();
+        })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'call_recordings' }, () => {
+          // 녹취 업로드/검수 변경 즉시 반영
+          loadApplies();
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'regions' }, () => {
           loadRegions();
@@ -949,7 +1203,7 @@ const copyBoardAsImage = async () => {
 
   if (checking) {
     return (
-      <main style={{ padding: 28, background: '#f4f6fb', minHeight: '100vh' }}>
+      <main style={{ padding: 28, background: '#f4f6fb', minHeight: '100vh', color: '#111827' }}>
         <h1 style={{ margin: 0 }}>관리자 페이지</h1>
         <p style={{ marginTop: 8, color: '#444' }}>로그인/권한 확인 중...</p>
       </main>
@@ -957,7 +1211,7 @@ const copyBoardAsImage = async () => {
   }
 
   return (
-    <main style={{ padding: 28, background: '#f4f6fb', minHeight: '100vh' }}>
+    <main style={{ padding: 28, background: '#f4f6fb', minHeight: '100vh', color: '#111827' }}>
       <div
         style={{
           maxWidth: 1100,
@@ -1544,6 +1798,8 @@ const copyBoardAsImage = async () => {
                   <th style={{ ...thSmall, width: 90, textAlign: 'center' }}>지역</th>
                   <th style={{ ...thSmall, width: 110, textAlign: 'center' }}>팀장</th>
                   <th style={{ ...thSmall }}>기업명</th>
+                  <th style={{ ...thSmall, width: 330, textAlign: 'center' }}>녹취</th>
+                  <th style={{ ...thSmall, width: 110, textAlign: 'center' }}>검수</th>
                   <th style={{ ...thSmall, width: 90, textAlign: 'center' }}>삭제</th>
                 </tr>
               </thead>
@@ -1569,6 +1825,171 @@ const copyBoardAsImage = async () => {
                       >
                         {a.company_name}
                       </td>
+
+                      {/* ✅ 녹취 업로드/재생 */}
+                      <td style={{ ...tdSmall, width: 330 }}>
+                        {(() => {
+                          const rec = recordingsByAppId[a.id];
+                          const uploading = !!uploadingByAppId[a.id];
+                          const dragOn = dragOverAppId === a.id;
+                          const audioUrl = audioUrlByAppId[a.id];
+                          const isOpen = openPlayerAppId === a.id;
+
+                          return (
+                            <div
+                              onDragOver={(e) => {
+                                e.preventDefault();
+                                setDragOverAppId(a.id);
+                              }}
+                              onDragLeave={() => setDragOverAppId(null)}
+                              onDrop={(e) => {
+                                e.preventDefault();
+                                setDragOverAppId(null);
+                                const file = e.dataTransfer.files?.[0];
+                                if (file) handleUploadRecording(a.id, file);
+                              }}
+                              style={{
+                                border: `1px dashed ${dragOn ? '#60a5fa' : '#cbd5e1'}`,
+                                background: dragOn ? '#eff6ff' : '#f8fafc',
+                                borderRadius: 10,
+                                padding: '8px 10px',
+                              }}
+                            >
+                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+                                <div style={{ minWidth: 0 }}>
+                                  <div style={{ fontSize: 12, fontWeight: 900, color: '#0f172a' }}>
+                                    {rec ? '등록됨' : '미등록'}
+                                    {uploading ? ' · 업로드중…' : ''}
+                                  </div>
+                                  <div
+                                    style={{
+                                      marginTop: 2,
+                                      fontSize: 12,
+                                      color: '#475569',
+                                      fontWeight: 700,
+                                      whiteSpace: 'nowrap',
+                                      overflow: 'hidden',
+                                      textOverflow: 'ellipsis',
+                                      maxWidth: 210,
+                                    }}
+                                    title={rec?.file_name ?? ''}
+                                  >
+                                    {rec?.file_name ?? '여기로 파일을 끌어다 놓거나 업로드 버튼을 누르세요'}
+                                  </div>
+                                </div>
+
+                                <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+                                  <input
+                                    id={`rec-${a.id}`}
+                                    type="file"
+                                    accept="audio/*"
+                                    style={{ display: 'none' }}
+                                    onChange={(e) => {
+                                      const f = e.target.files?.[0];
+                                      if (f) handleUploadRecording(a.id, f);
+                                      e.currentTarget.value = '';
+                                    }}
+                                  />
+                                  <button
+                                    type="button"
+                                    disabled={uploading}
+                                    onClick={() => (document.getElementById(`rec-${a.id}`) as HTMLInputElement | null)?.click()}
+                                    style={{
+                                      height: 30,
+                                      padding: '0 10px',
+                                      borderRadius: 8,
+                                      border: '1px solid #333',
+                                      background: '#fff',
+                                      fontWeight: 900,
+                                      cursor: uploading ? 'not-allowed' : 'pointer',
+                                      fontSize: 12,
+                                      opacity: uploading ? 0.6 : 1,
+                                    }}
+                                  >
+                                    {uploading ? '업로드중' : '업로드'}
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    disabled={!rec}
+                                    onClick={() => handlePlayRecording(a.id)}
+                                    style={{
+                                      height: 30,
+                                      padding: '0 10px',
+                                      borderRadius: 8,
+                                      border: '1px solid #333',
+                                      background: '#fff',
+                                      fontWeight: 900,
+                                      cursor: rec ? 'pointer' : 'not-allowed',
+                                      fontSize: 12,
+                                      opacity: rec ? 1 : 0.5,
+                                    }}
+                                  >
+                                    {isOpen ? '접기' : '재생'}
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    disabled={!rec || uploading}
+                                    onClick={() => handleDeleteRecording(a.id)}
+                                    style={{
+                                      height: 30,
+                                      padding: '0 10px',
+                                      borderRadius: 8,
+                                      border: '1px solid #b91c1c',
+                                      background: '#fff0f0',
+                                      color: '#b91c1c',
+                                      fontWeight: 900,
+                                      cursor: !rec || uploading ? 'not-allowed' : 'pointer',
+                                      fontSize: 12,
+                                      opacity: !rec || uploading ? 0.5 : 1,
+                                    }}
+                                  >
+                                    삭제
+                                  </button>
+                                </div>
+                              </div>
+
+                              {isOpen && audioUrl && (
+                                <div style={{ marginTop: 8 }}>
+                                  <audio controls src={audioUrl} style={{ width: '100%' }} />
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })()}
+                      </td>
+
+                      {/* ✅ 검수 완료 체크 */}
+                      <td style={{ ...tdSmall, width: 110, textAlign: 'center' }}>
+                        {(() => {
+                          const rec = recordingsByAppId[a.id];
+                          const checked = !!rec?.reviewed;
+
+                          return (
+                            <label
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 8,
+                                cursor: rec ? 'pointer' : 'not-allowed',
+                                userSelect: 'none',
+                              }}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                disabled={!rec}
+                                onChange={(e) => handleToggleReviewed(a.id, e.target.checked)}
+                              />
+                              <span style={{ fontSize: 13, fontWeight: 900, color: checked ? '#166534' : '#64748b' }}>
+                                {checked ? '완료' : '미완료'}
+                              </span>
+                            </label>
+                          );
+                        })()}
+                      </td>
+
                       <td style={{ ...tdSmall, width: 90, textAlign: 'center' }}>
                         <button onClick={() => deleteApply(a.id)} style={dangerMiniBtn} disabled={busyDelete === a.id}>
                           {busyDelete === a.id ? '삭제중...' : '삭제'}
@@ -1580,7 +2001,7 @@ const copyBoardAsImage = async () => {
 
                 {filteredApplies.length === 0 && (
                   <tr>
-                    <td colSpan={5} style={{ padding: 12, color: '#666', textAlign: 'center' }}>
+                    <td colSpan={7} style={{ padding: 12, color: '#666', textAlign: 'center' }}>
                       표시할 지원 내역이 없습니다.
                     </td>
                   </tr>
