@@ -141,6 +141,13 @@ export default function AdminPage() {
   const [applyQuery, setApplyQuery] = useState<string>('');
   const [applyRegionFilter, setApplyRegionFilter] = useState<string>('');
 
+  // 기업명 인라인 수정
+  const [editingCompanyId, setEditingCompanyId] = useState<string | null>(null);
+  const [companyInputById, setCompanyInputById] = useState<Record<string, string>>({});
+  const [busyUpdateCompanyId, setBusyUpdateCompanyId] = useState<string | null>(null);
+  const [isComposingCompanyById, setIsComposingCompanyById] = useState<Record<string, boolean>>({});
+
+
 
   const [regionsStatus, setRegionsStatus] = useState<RegionStatusRow[]>([]);
   const [regionsMap, setRegionsMap] = useState<Map<string, RegionRow>>(new Map());
@@ -480,6 +487,38 @@ const handleToggleReviewed = async (applicationId: string, checked: boolean) => 
     pushToast('success', '삭제 완료');
     await loadApplies();
     await loadStatus();
+  };
+
+  const updateCompanyName = async (id: string) => {
+    pushToast('info', '');
+    if (busyUpdateCompanyId) return;
+
+    if (isComposingCompanyById[id]) {
+      pushToast('info', '한글 입력이 완료된 후 저장해주세요.');
+      return;
+    }
+
+    const nextName = (companyInputById[id] ?? '').trim();
+    if (!nextName) {
+      pushToast('info', '기업명을 입력해주세요.');
+      return;
+    }
+
+    setBusyUpdateCompanyId(id);
+
+    const { error } = await supabase.from('applications_live').update({ company_name: nextName }).eq('id', id);
+
+    if (error) {
+      setErrorMsg(`기업명 수정 실패: ${error.message}`);
+      setBusyUpdateCompanyId(null);
+      return;
+    }
+
+    pushToast('success', '기업명 수정 완료');
+    setEditingCompanyId(null);
+    setBusyUpdateCompanyId(null);
+
+    await loadApplies(); // 화면 즉시 반영
   };
 
   const loadApplyLimit = async () => {
@@ -1720,10 +1759,11 @@ const copyBoardAsImage = async () => {
         style={{
           marginTop: 18,
           width: '100%',
-          maxWidth: 1100,
+          maxWidth: 1400,
           border: '1px solid #e5e7eb',
           borderRadius: 14,
-          overflow: 'hidden',
+          overflowX: 'auto',
+          overflowY: 'hidden',
           background: '#fff',
           boxShadow: '0 10px 30px rgba(17, 24, 39, 0.06)',
           display: 'flex',
@@ -1817,13 +1857,76 @@ const copyBoardAsImage = async () => {
                       <td
                         style={{
                           ...tdSmall,
-                          whiteSpace: 'nowrap',
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
+                          minWidth: 320,
+                          ...(editingCompanyId === a.id
+                            ? { whiteSpace: 'normal', overflow: 'hidden', textOverflow: 'clip' }
+                            : { whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }),
                         }}
                         title={a.company_name}
                       >
-                        {a.company_name}
+                        {editingCompanyId === a.id ? (
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+                            <input
+                              value={companyInputById[a.id] ?? a.company_name ?? ''}
+                              onChange={(e) => setCompanyInputById((p) => ({ ...p, [a.id]: e.target.value }))}
+                              onCompositionStart={() =>
+                                setIsComposingCompanyById((p) => ({ ...p, [a.id]: true }))
+                              }
+                              onCompositionEnd={(e) => {
+                                setIsComposingCompanyById((p) => ({ ...p, [a.id]: false }));
+                                // 조합 완료 시 최종 값을 확정 저장
+                                setCompanyInputById((p) => ({ ...p, [a.id]: (e.target as HTMLInputElement).value }));
+                              }}
+                              style={{
+                                ...input,
+                                height: 32,
+                                width: '100%',
+                                flex: '1 1 260px',
+                                minWidth: 0,
+                                maxWidth: 520,
+                                textAlign: 'left',
+                              }}
+                              placeholder="기업명 수정"
+                            />
+                            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                              <button
+                                onClick={() => updateCompanyName(a.id)}
+                                style={rowBtn}
+                                disabled={busyUpdateCompanyId === a.id || !!isComposingCompanyById[a.id]}
+                              >
+                                {busyUpdateCompanyId === a.id ? '저장중...' : '저장'}
+                              </button>
+                              <button onClick={() => setEditingCompanyId(null)} style={rowBtn}>
+                                취소
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div style={{ display: 'flex', gap: 8, alignItems: 'center', width: '100%' }}>
+                            <span
+                              title={a.company_name ?? ''}
+                              style={{
+                                flex: 1,
+                                minWidth: 0,              // 중요: 말줄임이 동작하려면 필요
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap',
+                              }}
+                            >
+                              {a.company_name}
+                            </span>
+
+                            <button
+                              onClick={() => {
+                                setEditingCompanyId(a.id);
+                                setCompanyInputById((p) => ({ ...p, [a.id]: a.company_name ?? '' }));
+                              }}
+                              style={{ ...rowBtn, flex: '0 0 auto' }} // 버튼은 줄어들지 않게
+                            >
+                              수정
+                            </button>
+                          </div>
+                        )}
                       </td>
 
                       {/* ✅ 녹취 업로드/재생 */}
