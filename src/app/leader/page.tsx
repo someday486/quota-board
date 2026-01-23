@@ -369,6 +369,12 @@ export default function LeaderPage() {
     let alive = true;
     let ch: ReturnType<typeof supabase.channel> | null = null;
 
+    // Realtime 끊김(절전/네트워크 전환 등) 대비: 재구독 타이머 + 현재 uid 보관
+    let retryTimer: number | null = null;
+    let pollTimer: number | null = null;
+    let uidRef: string | null = null;
+    let onVis: (() => void) | null = null;
+
     const boot = async () => {
       const { data: userRes, error: userErr } = await supabase.auth.getUser();
       if (!alive) return;
@@ -380,6 +386,7 @@ export default function LeaderPage() {
 
       const uid = userRes.user.id;
       setMyUserId(uid);
+      uidRef = uid;
 
       const { data: prof, error: profErr } = await supabase
         .from('profiles')
@@ -415,35 +422,97 @@ export default function LeaderPage() {
 
       if (!alive) return;
 
-      ch = supabase
-        .channel('leader-live')
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'region_totals' }, () => {
+      const resubscribe = () => {
+        if (!alive || !uidRef) return;
+
+        // 기존 채널 정리
+        if (ch) supabase.removeChannel(ch);
+
+        ch = supabase
+          // 재구독 시 채널명 충돌 방지
+          .channel(`leader-live-${Date.now()}`)
+
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'region_totals' }, () => {
+            loadStatus();
+          })
+
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'applications_live' }, () => {
+            loadStatus();
+            loadMyApplies(uidRef!);
+            loadMyTodayCount(uidRef!);
+          })
+
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'regions' }, () => {
+            loadRegions();
+            loadStatus();
+          })
+
+          // ✅ app_settings 구독은 "한 번만" 둡니다 (아래 중복 구독은 삭제할 예정)
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'app_settings' }, (payload) => {
+            const nk = (payload?.new as any)?.key;
+            const ok = (payload?.old as any)?.key;
+
+            if (nk === LIMIT_SETTING_KEY || ok === LIMIT_SETTING_KEY) loadLimit();
+            if (nk === EXEMPT_SETTING_KEY || ok === EXEMPT_SETTING_KEY) loadExempt();
+            if (nk === GROUP_SETTING_KEY || ok === GROUP_SETTING_KEY) loadActiveGroup();
+          })
+
+          .subscribe((status) => {
+            // 정상 상태
+            if (status === 'SUBSCRIBED') return;
+
+            // 끊김/에러면 자동 재구독
+            if (status === 'CLOSED' || status === 'TIMED_OUT' || status === 'CHANNEL_ERROR') {
+              if (retryTimer) window.clearTimeout(retryTimer);
+              retryTimer = window.setTimeout(() => {
+                // 놓친 이벤트 보정: 재구독 직후 한번 강제 동기화
+                loadLimit();
+                loadExempt();
+                loadActiveGroup();
+                loadStatus();
+                loadMyApplies(uidRef!);
+                loadMyTodayCount(uidRef!);
+
+                resubscribe();
+              }, 1000);
+            }
+          });
+      };
+
+      // 최초 1회 구독
+      resubscribe();
+
+      // 탭이 오래 백그라운드/절전이었다가 돌아오는 경우 놓친 변경 보정
+      onVis = () => {
+        if (!alive) return;
+        if (document.visibilityState === 'visible') {
+          loadLimit();
+          loadExempt();
+          loadActiveGroup();
           loadStatus();
-        })
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'applications_live' }, () => {
-          loadStatus();
-          loadMyApplies(uid);
-          loadMyTodayCount(uid);
-        })
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'regions' }, () => {
-          loadRegions();
-          loadStatus();
-        })
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'app_settings' }, (payload) => {
-          const nk = (payload?.new as any)?.key;
-          const ok = (payload?.old as any)?.key;
-          if (nk === LIMIT_SETTING_KEY || ok === LIMIT_SETTING_KEY) loadLimit();
-          if (nk === EXEMPT_SETTING_KEY || ok === EXEMPT_SETTING_KEY) loadExempt();
-          if (nk === GROUP_SETTING_KEY || ok === GROUP_SETTING_KEY) loadActiveGroup();
-        })
-        .on(
-            'postgres_changes',
-            { event: '*', schema: 'public', table: 'app_settings', filter: `key=eq.${ACTIVE_GROUP_KEY}` },
-            () => loadActiveGroup()
-          )        
-        .subscribe();
+          if (uidRef) {
+            loadMyApplies(uidRef);
+            loadMyTodayCount(uidRef);
+          }
+        }
+      };
+      if (onVis) document.addEventListener('visibilitychange', onVis);
+
+      // Realtime이 잠깐 죽어도 정합성 유지용 백업 폴링(30초)
+      pollTimer = window.setInterval(() => {
+        if (!alive) return;
+        loadLimit();
+        loadExempt();
+        loadActiveGroup();
+        loadStatus();
+        if (uidRef) {
+          loadMyApplies(uidRef);
+          loadMyTodayCount(uidRef);
+        }
+      }, 30000);
 
       setChecking(false);
+
     };
 
     boot();
@@ -451,6 +520,9 @@ export default function LeaderPage() {
     return () => {
       alive = false;
       if (ch) supabase.removeChannel(ch);
+      if (retryTimer) window.clearTimeout(retryTimer);
+      if (pollTimer) window.clearInterval(pollTimer);
+      if (onVis) document.removeEventListener('visibilitychange', onVis);
       if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -467,7 +539,7 @@ export default function LeaderPage() {
 
   if (checking) {
     return (
-      <main style={{ minHeight: '100vh', background: '#f3f4f6', padding: 24 }}>
+      <main lang="ko-KR" style={{ minHeight: '100vh', background: '#f3f4f6', padding: 24 }}>
         <div style={{ maxWidth: 1100, margin: '0 auto' }}>
           <div style={headerCard}>
             <div>
@@ -483,7 +555,7 @@ export default function LeaderPage() {
   }
 
   return (
-    <main style={{ minHeight: '100vh', background: '#f3f4f6', padding: 24 }}>
+    <main lang="ko-KR" style={{ minHeight: '100vh', background: '#f3f4f6', padding: 24 }}>
       <div style={{ maxWidth: 1100, margin: '0 auto' }}>
         {/* 헤더 */}
         <div style={headerCard}>
@@ -698,6 +770,12 @@ export default function LeaderPage() {
 
                     <td style={td}>
                       <input
+                        lang="ko"
+                        inputMode="text"
+                        autoComplete="off"
+                        autoCorrect="off"
+                        autoCapitalize="none"
+                        spellCheck={false}
                         value={companyByRegionId[r.region_id] ?? ''}
                         onChange={(e) =>
                           setCompanyByRegionId((prev) => ({ ...prev, [r.region_id]: e.target.value }))
