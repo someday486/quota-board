@@ -20,6 +20,8 @@ type LiveApplyRow = {
   region_id: string;
   leader_name: string;
   company_name: string;
+  is_excluded: boolean;
+  is_reserve: boolean;
 };
 
 type RegionRow = {
@@ -56,7 +58,18 @@ type CallRecordingRow = {
   reviewed_at: string | null;
   reviewed_by: string | null;
 };
-
+const fmtDT = (v?: string | null) => {
+  if (!v) return '';
+  const d = new Date(v);
+  return d.toLocaleString('ko-KR', {
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  });
+};
 export default function AdminPage() {
   const router = useRouter();
   const boardRef = useRef<HTMLDivElement | null>(null);
@@ -94,6 +107,8 @@ export default function AdminPage() {
   type Toast = { id: string; type: ToastType; text: string };
   const [toasts, setToasts] = useState<Toast[]>([]);
   const pushToast = (type: ToastType, text: string) => {
+    // 빈 토스트는 무시(운영 화면 깔끔하게)
+    if (!text || !text.trim()) return;
     const id = `${Date.now()}_${Math.random().toString(16).slice(2)}`;
     setToasts((prev) => [...prev, { id, type, text }]);
     // auto-dismiss
@@ -159,6 +174,8 @@ export default function AdminPage() {
 
   // 지원 목록
   const [applies, setApplies] = useState<LiveApplyRow[]>([]);
+  // 예비 등록 목록(별도 표시)
+  const [reserveApplies, setReserveApplies] = useState<LiveApplyRow[]>([]);
   const [busyDelete, setBusyDelete] = useState<string | null>(null);
 
   const loadRegions = async () => {
@@ -239,20 +256,32 @@ const loadRecordings = async (appIds: string[]) => {
     // applications_live에는 region_name이 없으니, regionsMap으로 표시
     const { data, error } = await supabase
       .from('applications_live')
-      .select('id, created_at, region_id, leader_name, company_name')
+      .select('id, created_at, region_id, leader_name, company_name, is_excluded, is_reserve')
       .order('created_at', { ascending: false })
-      .limit(300);
+      .limit(500);
 
     if (error) {
       setErrorMsg(error.message);
       return;
     }
 
-    const list = (data as LiveApplyRow[]) ?? [];
-    setApplies(list);
+    const listRaw = (data as any[]) ?? [];
+    const listAll: LiveApplyRow[] = listRaw.map((x) => ({
+      id: String(x.id),
+      created_at: String(x.created_at),
+      region_id: String(x.region_id),
+      leader_name: String(x.leader_name ?? ''),
+      company_name: String(x.company_name ?? ''),
+      is_excluded: Boolean(x.is_excluded),
+      is_reserve: Boolean(x.is_reserve),
+    }));
+    const normals = listAll.filter((x) => !x.is_reserve);
+    const reserves = listAll.filter((x) => x.is_reserve);
+    setApplies(normals);
+    setReserveApplies(reserves);
 
-    // ✅ 녹취(부가 기능)도 같이 로드
-    await loadRecordings(list.map((x) => x.id));
+    // ✅ 녹취(부가 기능)는 정식 목록 기준으로만 로드
+    await loadRecordings(normals.map((x) => x.id));
   };
 
 
@@ -469,23 +498,97 @@ const handleToggleReviewed = async (applicationId: string, checked: boolean) => 
     await loadStatus();
   };
 
-  const deleteApply = async (id: string) => {
+  const deleteApply = async (row: LiveApplyRow) => {
     pushToast('info', '');
     if (busyDelete) return;
 
-    setBusyDelete(id);
+    const rn = regionsMap.get(row.region_id)?.region_name ?? row.region_id;
+    const cn = (row.company_name ?? '').trim();
 
-    const { error } = await supabase.from('applications_live').delete().eq('id', id);
+    const ok = window.confirm(
+      [
+        '정말 삭제하시겠습니까?',
+        '',
+        `- 지역: ${rn}`,
+        `- 기업명: ${cn || '(미입력)'}`,
+        '',
+        '※ 삭제 후 복구할 수 없습니다.',
+        '※ 연결된 녹취가 있으면 함께 삭제됩니다.',
+      ].join('')
+    );
+    if (!ok) return;
 
-    if (error) {
-      setErrorMsg(`삭제 실패: ${error.message}`);
+    setBusyDelete(row.id);
+
+    try {
+      // ✅ 연결된 녹취가 있으면 같이 삭제(스토리지 → DB 순)
+      const rec = recordingsByAppId[row.id];
+      if (rec) {
+        const rm = await supabase.storage.from('call_recordings').remove([rec.file_path]);
+        if (rm.error) throw new Error(`녹취 스토리지 삭제 실패: ${rm.error.message}`);
+
+        const { error: recDelErr } = await supabase.from('call_recordings').delete().eq('id', rec.id);
+        if (recDelErr) throw new Error(`녹취 DB 삭제 실패: ${recDelErr.message}`);
+
+        setRecordingsByAppId((p) => ({ ...p, [row.id]: null }));
+        setAudioUrlByAppId((p) => {
+          const next = { ...p };
+          delete next[row.id];
+          return next;
+        });
+        if (openPlayerAppId === row.id) setOpenPlayerAppId(null);
+      }
+
+      // ✅ 지원 row 삭제
+      const { error } = await supabase.from('applications_live').delete().eq('id', row.id);
+      if (error) throw new Error(`삭제 실패: ${error.message}`);
+
+      pushToast('success', '삭제 완료');
+      await loadApplies();
+      await loadStatus();
+      await loadTodayCounts();
+    } catch (e: any) {
+      setErrorMsg(e?.message ?? String(e));
+    } finally {
       setBusyDelete(null);
+    }
+  };
+
+  const toggleExcludeApply = async (row: LiveApplyRow) => {
+    pushToast('info', '');
+    // busyDelete 재사용하면 UX가 꼬일 수 있어 별도 busy는 안 둠(클릭 연타는 버튼 disabled로 방지)
+    const rn = regionsMap.get(row.region_id)?.region_name ?? row.region_id;
+    const cn = (row.company_name ?? '').trim();
+    const next = !row.is_excluded;
+
+    const ok = window.confirm(
+      [
+        next ? '이 지원 건을 “제외” 처리할까요?' : '이 지원 건의 “제외”를 해제할까요?',
+        '',
+        `- 지역: ${rn}`,
+        `- 기업명: ${cn || '(미입력)'}`,
+        '',
+        next
+          ? '※ 지역별 TO/지역별 지원보드에서는 제외됩니다.'
+          : '※ 지역별 TO/지역별 지원보드에 다시 포함됩니다.',
+        '※ 팀장 개인 지원 수(하루 한도 카운트)는 그대로 유지됩니다.',
+      ].join('\n')
+    );
+    if (!ok) return;
+
+    // UI 즉시 반응(optimistic)
+    setApplies((prev) => prev.map((x) => (x.id === row.id ? ({ ...x, is_excluded: next } as LiveApplyRow) : x)));
+
+    const { error } = await supabase.from('applications_live').update({ is_excluded: next }).eq('id', row.id);
+    if (error) {
+      // 롤백
+      setApplies((prev) => prev.map((x) => (x.id === row.id ? ({ ...x, is_excluded: row.is_excluded } as LiveApplyRow) : x)));
+      setErrorMsg(`제외 처리 실패: ${error.message}`);
       return;
     }
 
-    setBusyDelete(null);
-    pushToast('success', '삭제 완료');
-    await loadApplies();
+    pushToast('success', next ? '제외 처리 완료' : '제외 해제 완료');
+    // region_status_view는 DB에서 집계하므로 재조회
     await loadStatus();
   };
 
@@ -1045,7 +1148,11 @@ const copyBoardAsImage = async () => {
   
   const boardByRegionId = useMemo(() => {
     // 보드는 “오래된 것 → 최신” 순으로 왼쪽부터 채워지는 게 캡쳐용으로 더 자연스러움
-    const asc = applies.slice().sort((a, b) => a.created_at.localeCompare(b.created_at));
+    // ✅ 제외(is_excluded=true)는 보드/지역 TO 집계에서 제외
+    const asc = applies
+      .filter((x) => !x.is_excluded)
+      .slice()
+      .sort((a, b) => a.created_at.localeCompare(b.created_at));
 
     const m = new Map<string, LiveApplyRow[]>();
     for (const a of asc) {
@@ -1124,6 +1231,12 @@ const copyBoardAsImage = async () => {
     let alive = true;
     let ch: ReturnType<typeof supabase.channel> | null = null;
 
+    // Realtime 끊김(절전/네트워크 전환 등) 대비
+    let retryTimer: number | null = null;
+    let pollTimer: number | null = null;
+    let uidRef: string | null = null;
+    let onVis: (() => void) | null = null;
+
     const boot = async () => {
       // 로그인 체크
       const { data: userRes, error: userErr } = await supabase.auth.getUser();
@@ -1136,6 +1249,7 @@ const copyBoardAsImage = async () => {
 
       const uid = userRes.user.id;
       setAdminUserId(uid);
+      uidRef = uid;
 
       // 관리자 권한 체크(프로젝트마다 다를 수 있어서 role/is_admin 둘 다 대응)
       const { data: prof, error: profErr } = await supabase
@@ -1175,58 +1289,96 @@ const copyBoardAsImage = async () => {
 
       if (!alive) return;
 
-      // realtime: region_totals / applications_live / regions / app_settings 변화 즉시 반영
-      ch = supabase
-        .channel('admin-live')
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'region_totals' }, () => {
+      const resubscribe = () => {
+        if (!alive) return;
+
+        if (ch) supabase.removeChannel(ch);
+
+        // realtime: region_totals / applications_live / regions / app_settings 변화 즉시 반영
+        ch = supabase
+          .channel(`admin-live-${Date.now()}`)
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'region_totals' }, () => {
+            loadStatus();
+          })
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'applications_live' }, () => {
+            loadApplies();
+            loadStatus();
+            loadTodayCounts();
+          })
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'call_recordings' }, () => {
+            // 녹취 업로드/검수 변경 즉시 반영
+            loadApplies();
+          })
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'regions' }, () => {
+            loadRegions();
+            loadStatus();
+          })
+          .on(
+            'postgres_changes',
+            { event: '*', schema: 'public', table: 'app_settings', filter: 'key=eq.apply_limit_per_user_per_day' },
+            (payload) => {
+              const row = (payload.new ?? payload.old) as any;
+              const v = Number(row?.value_int ?? 0);
+              const safe = Number.isFinite(v) ? Math.max(0, Math.trunc(v)) : 0;
+              setApplyLimit(safe);
+              setApplyLimitInput(String(safe));
+            },
+          )
+          .on(
+            'postgres_changes',
+            { event: '*', schema: 'public', table: 'app_settings', filter: `key=eq.${EXEMPT_KEY}` },
+            (payload) => {
+              const row = (payload.new ?? payload.old) as any;
+              const raw = row?.value_json;
+              const arr = Array.isArray(raw) ? raw : [];
+              setExemptUserIds(arr.map(String));
+            },
+          )
+          .on(
+            'postgres_changes',
+            { event: '*', schema: 'public', table: 'app_settings', filter: `key=eq.${GROUP_SETTING_KEY}` },
+            (payload) => {
+              const row = (payload.new ?? payload.old) as any;
+              const v = Number(row?.value_int ?? 0);
+              const safe = Number.isFinite(v) ? Math.max(0, Math.min(2, Math.trunc(v))) : 0;
+              setActiveGroup(safe);
+            },
+          )
+          .subscribe((status) => {
+            if (status === 'SUBSCRIBED') return;
+            if (status === 'CLOSED' || status === 'TIMED_OUT' || status === 'CHANNEL_ERROR') {
+              if (retryTimer) window.clearTimeout(retryTimer);
+              retryTimer = window.setTimeout(() => {
+                // 재구독 직후 한번 보정(놓친 이벤트 보완)
+                loadStatus();
+                loadApplies();
+                loadTodayCounts();
+                resubscribe();
+              }, 1000);
+            }
+          });
+      };
+
+      // 최초 구독
+      resubscribe();
+
+      // 탭 복귀 시 강제 동기화
+      onVis = () => {
+        if (document.visibilityState === 'visible') {
           loadStatus();
-        })
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'applications_live' }, () => {
           loadApplies();
-          loadStatus();
           loadTodayCounts();
-        })
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'call_recordings' }, () => {
-          // 녹취 업로드/검수 변경 즉시 반영
-          loadApplies();
-        })
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'regions' }, () => {
-          loadRegions();
-          loadStatus();
-        })
-        .on(
-          'postgres_changes',
-          { event: '*', schema: 'public', table: 'app_settings', filter: 'key=eq.apply_limit_per_user_per_day' },
-          (payload) => {
-            const row = (payload.new ?? payload.old) as any;
-            const v = Number(row?.value_int ?? 0);
-            const safe = Number.isFinite(v) ? Math.max(0, Math.trunc(v)) : 0;
-            setApplyLimit(safe);
-            setApplyLimitInput(String(safe));
-          },
-        )
-        .on(
-          'postgres_changes',
-          { event: '*', schema: 'public', table: 'app_settings', filter: `key=eq.${EXEMPT_KEY}` },
-          (payload) => {
-            const row = (payload.new ?? payload.old) as any;
-            const raw = row?.value_json;
-            const arr = Array.isArray(raw) ? raw : [];
-            setExemptUserIds(arr.map(String));
-          }
-        )
-        
-        .on(
-          'postgres_changes',
-          { event: '*', schema: 'public', table: 'app_settings', filter: `key=eq.${GROUP_SETTING_KEY}` },
-          (payload) => {
-            const row = (payload.new ?? payload.old) as any;
-            const v = Number(row?.value_int ?? 0);
-            const safe = Number.isFinite(v) ? Math.max(0, Math.min(2, Math.trunc(v))) : 0;
-            setActiveGroup(safe);
-          }
-        )
-.subscribe();
+        }
+      };
+      document.addEventListener('visibilitychange', onVis);
+
+      // (선택) 30초 폴링 백업
+      pollTimer = window.setInterval(() => {
+        if (!alive) return;
+        loadStatus();
+        loadApplies();
+        loadTodayCounts();
+      }, 30000);
 
       setChecking(false);
     };
@@ -1236,13 +1388,16 @@ const copyBoardAsImage = async () => {
     return () => {
       alive = false;
       if (ch) supabase.removeChannel(ch);
+      if (retryTimer) window.clearTimeout(retryTimer);
+      if (pollTimer) window.clearInterval(pollTimer);
+      if (onVis) document.removeEventListener('visibilitychange', onVis);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   if (checking) {
     return (
-      <main style={{ padding: 28, background: '#f4f6fb', minHeight: '100vh', color: '#111827' }}>
+      <main lang="ko-KR" style={{ padding: 28, background: '#f4f6fb', minHeight: '100vh', color: '#111827' }}>
         <h1 style={{ margin: 0 }}>관리자 페이지</h1>
         <p style={{ marginTop: 8, color: '#444' }}>로그인/권한 확인 중...</p>
       </main>
@@ -1250,7 +1405,7 @@ const copyBoardAsImage = async () => {
   }
 
   return (
-    <main style={{ padding: 28, background: '#f4f6fb', minHeight: '100vh', color: '#111827' }}>
+    <main lang="ko-KR" style={{ padding: 28, background: '#f4f6fb', minHeight: '100vh', color: '#111827' }}>
       <div
         style={{
           maxWidth: 1100,
@@ -1528,7 +1683,8 @@ const copyBoardAsImage = async () => {
                   disabled={busyApplyLimit}
                   style={{
                     height: 28,
-                    padding: '0 12px',
+                    padding: '0 10px',
+                            minWidth: 54,
                     borderRadius: 8,
                     border: '1px solid #111827',
                     background: busyApplyLimit ? '#f8fafc' : '#111827',
@@ -1585,6 +1741,11 @@ const copyBoardAsImage = async () => {
                 value={leaderQuery}
                 onChange={(e) => setLeaderQuery(e.target.value)}
                 placeholder="이름 검색"
+                lang="ko"
+                inputMode="text"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
                 style={{
                   ...input,
                   height: 34,
@@ -1695,7 +1856,7 @@ const copyBoardAsImage = async () => {
                               whiteSpace: 'nowrap',
                             }}
                           >
-                            한도 도달
+                            한도
                           </span>
                         )}
                       </div>
@@ -1806,6 +1967,11 @@ const copyBoardAsImage = async () => {
               value={applyQuery}
               onChange={(e) => setApplyQuery(e.target.value)}
               placeholder="팀장/기업명 검색"
+              lang="ko"
+              inputMode="text"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
               style={{ ...input, height: 34, padding: '0 10px', width: 140 }}
             />
 
@@ -1834,13 +2000,14 @@ const copyBoardAsImage = async () => {
             >
               <thead>
                 <tr style={{ background: '#f6f7f9', borderBottom: '1px solid #eee' }}>
-                  <th style={{ ...thSmall, width: 170, textAlign: 'center' }}>시간</th>
-                  <th style={{ ...thSmall, width: 90, textAlign: 'center' }}>지역</th>
-                  <th style={{ ...thSmall, width: 110, textAlign: 'center' }}>팀장</th>
+                  <th style={{ ...thSmall, width: 140, textAlign: 'center' }}>시간</th>
+                  <th style={{ ...thSmall, width: 70, textAlign: 'center' }}>지역</th>
+                  <th style={{ ...thSmall, width: 90, textAlign: 'center' }}>팀장</th>
                   <th style={{ ...thSmall }}>기업명</th>
-                  <th style={{ ...thSmall, width: 330, textAlign: 'center' }}>녹취</th>
-                  <th style={{ ...thSmall, width: 110, textAlign: 'center' }}>검수</th>
-                  <th style={{ ...thSmall, width: 90, textAlign: 'center' }}>삭제</th>
+                  <th style={{ ...thSmall, width: 310, textAlign: 'center' }}>녹취</th>
+                  <th style={{ ...thSmall, width: 90, textAlign: 'center' }}>검수</th>
+                  <th style={{ ...thSmall, width: 70, textAlign: 'center' }}>제외</th>
+                  <th style={{ ...thSmall, width: 70, textAlign: 'center' }}>삭제</th>
                 </tr>
               </thead>
 
@@ -1848,16 +2015,16 @@ const copyBoardAsImage = async () => {
                 {filteredApplies.map((a) => {
                   const rn = regionsMap.get(a.region_id)?.region_name ?? a.region_id;
                   return (
-                    <tr key={a.id} style={{ borderTop: '1px solid #eee' }}>
-                      <td style={{ ...tdSmall, width: 170, textAlign: 'center' }}>{new Date(a.created_at).toLocaleString()}</td>
-                      <td style={{ ...tdSmall, width: 90, textAlign: 'center' }}>{rn}</td>
-                      <td style={{ ...tdSmall, width: 110, textAlign: 'center' }}>
+                    <tr key={a.id} style={{ borderTop: '1px solid #eee', background: a.is_excluded ? '#f8fafc' : '#ffffff' }}>
+                      <td style={{ ...tdSmall, width: 140, textAlign: 'center' }}>{new Date(a.created_at).toLocaleString()}</td>
+                      <td style={{ ...tdSmall, width: 70, textAlign: 'center' }}>{rn}</td>
+                      <td style={{ ...tdSmall, width: 90, textAlign: 'center' }}>
                         <b>{a.leader_name}</b>
                       </td>
                       <td
                         style={{
                           ...tdSmall,
-                          minWidth: 320,
+                          minWidth: 260,
                           ...(editingCompanyId === a.id
                             ? { whiteSpace: 'normal', overflow: 'hidden', textOverflow: 'clip' }
                             : { whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }),
@@ -1865,7 +2032,7 @@ const copyBoardAsImage = async () => {
                         title={a.company_name}
                       >
                         {editingCompanyId === a.id ? (
-                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+                          <div style={{ display: 'flex', gap: 6, alignItems: 'center', width: '100%' }}>
                             <input
                               value={companyInputById[a.id] ?? a.company_name ?? ''}
                               onChange={(e) => setCompanyInputById((p) => ({ ...p, [a.id]: e.target.value }))}
@@ -1880,13 +2047,18 @@ const copyBoardAsImage = async () => {
                               style={{
                                 ...input,
                                 height: 32,
-                                width: '100%',
-                                flex: '1 1 260px',
+                                width: 'auto',
+                                flex: 1,
                                 minWidth: 0,
-                                maxWidth: 520,
+                                maxWidth: 'none',
                                 textAlign: 'left',
                               }}
                               placeholder="기업명 수정"
+                              lang="ko"
+                              inputMode="text"
+                              autoCapitalize="none"
+                              autoCorrect="off"
+                              spellCheck={false}
                             />
                             <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                               <button
@@ -1930,7 +2102,7 @@ const copyBoardAsImage = async () => {
                       </td>
 
                       {/* ✅ 녹취 업로드/재생 */}
-                      <td style={{ ...tdSmall, width: 330 }}>
+                      <td style={{ ...tdSmall, width: 310 }}>
                         {(() => {
                           const rec = recordingsByAppId[a.id];
                           const uploading = !!uploadingByAppId[a.id];
@@ -2064,7 +2236,7 @@ const copyBoardAsImage = async () => {
                       </td>
 
                       {/* ✅ 검수 완료 체크 */}
-                      <td style={{ ...tdSmall, width: 110, textAlign: 'center' }}>
+                      <td style={{ ...tdSmall, width: 90, textAlign: 'center' }}>
                         {(() => {
                           const rec = recordingsByAppId[a.id];
                           const checked = !!rec?.reviewed;
@@ -2093,8 +2265,30 @@ const copyBoardAsImage = async () => {
                         })()}
                       </td>
 
-                      <td style={{ ...tdSmall, width: 90, textAlign: 'center' }}>
-                        <button onClick={() => deleteApply(a.id)} style={dangerMiniBtn} disabled={busyDelete === a.id}>
+                      <td style={{ ...tdSmall, width: 70, textAlign: 'center' }}>
+                        <button
+                          onClick={() => toggleExcludeApply(a)}
+                          style={{
+                            height: 32,
+                            padding: '0 10px',
+                            minWidth: 54,
+                            borderRadius: 10,
+                            border: a.is_excluded ? '1px solid #0f172a' : '1px solid #475569',
+                            background: a.is_excluded ? '#0f172a' : '#ffffff',
+                            color: a.is_excluded ? '#ffffff' : '#0f172a',
+                            fontWeight: 900,
+                            cursor: 'pointer',
+                            opacity: busyDelete ? 0.6 : 1,
+                          }}
+                          disabled={!!busyDelete}
+                          title={a.is_excluded ? '현재 제외 상태(클릭하면 해제)' : '클릭하면 제외 처리'}
+                        >
+                          {a.is_excluded ? '해제' : '제외'}
+                        </button>
+                      </td>
+
+                      <td style={{ ...tdSmall, width: 70, textAlign: 'center' }}>
+                        <button onClick={() => deleteApply(a)} style={dangerMiniBtn} disabled={busyDelete === a.id}>
                           {busyDelete === a.id ? '삭제중...' : '삭제'}
                         </button>
                       </td>
@@ -2104,7 +2298,7 @@ const copyBoardAsImage = async () => {
 
                 {filteredApplies.length === 0 && (
                   <tr>
-                    <td colSpan={7} style={{ padding: 12, color: '#666', textAlign: 'center' }}>
+                    <td colSpan={8} style={{ padding: 12, color: '#666', textAlign: 'center' }}>
                       표시할 지원 내역이 없습니다.
                     </td>
                   </tr>
@@ -2112,6 +2306,77 @@ const copyBoardAsImage = async () => {
               </tbody>
             </table>
           </div>
+        </div>
+      </div>
+
+      {/* ✅ 예비 등록 목록 (TO 미반영 / 개인 한도는 포함) */}
+      <div style={{ marginTop: 26 }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12, marginBottom: 8 }}>
+          <h2 style={{ margin: 0 }}>예비 등록 목록</h2>
+          <div style={{ fontSize: 12, color: '#64748b' }}>총 {reserveApplies.length}건</div>
+        </div>
+
+        <div style={{ border: '1px solid #ddd', borderRadius: 10, overflow: 'hidden', maxWidth: 1100, background: '#fff' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
+            <thead>
+              <tr style={{ background: '#f6f7f9' }}>
+                <th style={{ ...thSmall, width: 140 }}>시간</th>
+                <th style={{ ...thSmall, width: 70 }}>지역</th>
+                <th style={{ ...thSmall, width: 90 }}>팀장</th>
+                <th style={thSmall}>기업명</th>
+                <th style={{ ...thSmall, width: 70, textAlign: 'center' }}>삭제</th>
+              </tr>
+            </thead>
+            <tbody>
+              {reserveApplies.map((a) => {
+                const rn = regionsMap.get(a.region_id)?.region_name ?? a.region_id;
+                return (
+                  <tr key={a.id} style={{ borderTop: '1px solid #eee' }}>
+                    <td style={{ ...tdSmall, width: 140, whiteSpace: 'nowrap' }}>{fmtDT(a.created_at)}</td>
+                    <td style={{ ...tdSmall, width: 70, whiteSpace: 'nowrap' }}>{rn}</td>
+                    <td style={{ ...tdSmall, width: 90, whiteSpace: 'nowrap', fontWeight: 900 }}>{a.leader_name}</td>
+                    <td style={{ ...tdSmall }}>
+                      <span style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 8,
+                        flexWrap: 'wrap',
+                      }}>
+                        <span
+                          style={{
+                            display: 'inline-block',
+                            padding: '2px 8px',
+                            borderRadius: 999,
+                            fontSize: 12,
+                            fontWeight: 900,
+                            background: '#fff7ed',
+                            border: '1px solid #fdba74',
+                            color: '#9a3412',
+                          }}
+                        >
+                          예비
+                        </span>
+                        <span style={{ fontWeight: 900 }}>{a.company_name}</span>
+                      </span>
+                    </td>
+                    <td style={{ ...tdSmall, width: 70, textAlign: 'center' }}>
+                      <button onClick={() => deleteApply(a)} style={dangerMiniBtn} disabled={busyDelete === a.id}>
+                        {busyDelete === a.id ? '삭제중...' : '삭제'}
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+
+              {reserveApplies.length === 0 && (
+                <tr>
+                  <td colSpan={5} style={{ padding: 12, color: '#666', textAlign: 'center' }}>
+                    예비 등록 내역이 없습니다.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
         </div>
       </div>
 
@@ -2135,7 +2400,7 @@ const copyBoardAsImage = async () => {
           {busyCopyBoard ? '복사중...' : '보드 이미지 복사'}
         </button>
       </div>
-      <div ref={boardRef}>
+      <div>
         <div style={{ overflowX: 'auto' }}>
           <div
             ref={boardRef}
@@ -2374,7 +2639,8 @@ const miniBtn: React.CSSProperties = {
 
 const miniPrimaryBtn: React.CSSProperties = {
   height: 30,
-  padding: '0 12px',
+  padding: '0 10px',
+                            minWidth: 54,
   borderRadius: 10,
   border: '1px solid #111',
   background: '#111',
@@ -2386,7 +2652,8 @@ const miniPrimaryBtn: React.CSSProperties = {
 
 const miniDangerBtn: React.CSSProperties = {
   height: 30,
-  padding: '0 12px',
+  padding: '0 10px',
+                            minWidth: 54,
   borderRadius: 10,
   border: '1px solid #b40000',
   background: '#fff0f0',
@@ -2409,7 +2676,8 @@ const rowBtn: React.CSSProperties = {
 
 const dangerMiniBtn: React.CSSProperties = {
   height: 32,
-  padding: '0 12px',
+  padding: '0 10px',
+                            minWidth: 54,
   borderRadius: 10,
   border: '1px solid #b40000',
   background: '#fff0f0',

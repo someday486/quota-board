@@ -20,6 +20,7 @@ type MyApplyRow = {
   region_id: string;
   leader_name: string;
   company_name: string;
+  is_reserve: boolean;
 };
 
 type RegionRow = {
@@ -85,6 +86,12 @@ export default function LeaderPage() {
   const [busyRegionId, setBusyRegionId] = useState<string | null>(null);
 
   const [myApplies, setMyApplies] = useState<MyApplyRow[]>([]);
+
+  // 예비 등록(대기열)
+  const [reserveOpen, setReserveOpen] = useState(false);
+  const [reserveRegionId, setReserveRegionId] = useState<string>('');
+  const [reserveCompany, setReserveCompany] = useState<string>('');
+  const [busyReserve, setBusyReserve] = useState<boolean>(false);
 
   // 공통 1인당 하루 한도(0이면 무제한)
   const [perPersonLimit, setPerPersonLimit] = useState<number>(0);
@@ -168,7 +175,7 @@ export default function LeaderPage() {
   const loadMyApplies = async (uid: string) => {
     const { data, error } = await supabase
       .from('applications_live')
-      .select('id, created_at, region_id, leader_name, company_name')
+      .select('id, created_at, region_id, leader_name, company_name, is_reserve')
       .eq('user_id', uid)
       .order('created_at', { ascending: false })
       .limit(100);
@@ -362,6 +369,78 @@ export default function LeaderPage() {
     }
 
     setBusyRegionId(null);
+  };
+
+  const closedRegions = useMemo(() => {
+    return (statusRows ?? []).filter((r) => (r.capacity_total ?? 0) > 0 && Boolean(r.is_closed));
+  }, [statusRows]);
+
+  const openReserveModal = () => {
+    clearError();
+    const first = closedRegions[0]?.region_id ?? '';
+    setReserveRegionId(first);
+    setReserveCompany('');
+    setReserveOpen(true);
+  };
+
+  const submitReserve = async () => {
+    clearError();
+    if (busyReserve) return;
+
+    if (limitBlocked) {
+      setErrorMsg('오늘 지원 가능 횟수가 0명입니다. (공통 1인당 하루 한도 도달)');
+      return;
+    }
+    if (groupBlocked) {
+      setErrorMsg(`오늘은 ${activeGroupLabel}만 지원 가능합니다. (내 소속: ${myGroupLabel})`);
+      return;
+    }
+
+    const rid = reserveRegionId;
+    if (!rid) {
+      setErrorMsg('마감된 지역을 선택하세요.');
+      return;
+    }
+    const r = closedRegions.find((x) => x.region_id === rid);
+    if (!r) {
+      setErrorMsg('마감된 지역만 예비 등록이 가능합니다.');
+      return;
+    }
+
+    const c = (reserveCompany ?? '').trim();
+    if (!c) {
+      setErrorMsg('기업명을 입력하세요.');
+      return;
+    }
+
+    if (!myUserId) {
+      router.replace('/login');
+      return;
+    }
+
+    setBusyReserve(true);
+    try {
+      const { error } = await supabase.from('applications_live').insert({
+        user_id: myUserId,
+        leader_name: leaderName,
+        region_id: rid,
+        company_name: c,
+        is_reserve: true,
+        is_excluded: false,
+      } as any);
+
+      if (error) {
+        setErrorMsg(error.message);
+        return;
+      }
+
+      showToast('success', '예비 등록 완료');
+      setReserveOpen(false);
+      setReserveCompany('');
+      await Promise.all([loadMyApplies(myUserId), loadMyTodayCount(myUserId)]);
+    } finally {
+      setBusyReserve(false);
+    }
   };
 
   // 로그인 + role 체크 + 초기 로드 + realtime
@@ -724,7 +803,27 @@ export default function LeaderPage() {
               <div style={cardTitle}>지역별 배정 가능 수량(TO)</div>
               <div style={cardSubTitle}>실시간 현황 · 기업명 입력 후 지원</div>
             </div>
-            <div style={{ fontSize: 12, color: '#64748b', fontWeight: 800 }}>Enter로 빠른 지원</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <button
+                type="button"
+                onClick={openReserveModal}
+                style={{
+                  height: 34,
+                  padding: '0 12px',
+                  borderRadius: 12,
+                  border: '1px solid #0f172a',
+                  background: '#0f172a',
+                  color: '#fff',
+                  fontWeight: 900,
+                  cursor: 'pointer',
+                }}
+                disabled={closedRegions.length === 0 || limitBlocked || groupBlocked}
+                title={closedRegions.length === 0 ? '마감된 지역이 없어서 예비 등록이 필요 없습니다.' : '마감된 지역에 예비 등록합니다.'}
+              >
+                예비등록
+              </button>
+              <div style={{ fontSize: 12, color: '#64748b', fontWeight: 800 }}>Enter로 빠른 지원</div>
+            </div>
           </div>
 
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
@@ -868,7 +967,27 @@ export default function LeaderPage() {
                   <tr key={a.id} style={{ borderTop: '1px solid #eef2f7' }}>
                     <td style={tdSmall}>{new Date(a.created_at).toLocaleString()}</td>
                     <td style={tdSmall}>{rn}</td>
-                    <td style={tdSmall}>{a.company_name}</td>
+                    <td style={tdSmall}>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                        {a.is_reserve ? (
+                          <span
+                            style={{
+                              display: 'inline-block',
+                              padding: '2px 8px',
+                              borderRadius: 999,
+                              fontSize: 12,
+                              fontWeight: 900,
+                              background: '#fff7ed',
+                              border: '1px solid #fdba74',
+                              color: '#9a3412',
+                            }}
+                          >
+                            예비
+                          </span>
+                        ) : null}
+                        <span style={{ fontWeight: 900 }}>{a.company_name}</span>
+                      </span>
+                    </td>
                   </tr>
                 );
               })}
@@ -883,6 +1002,134 @@ export default function LeaderPage() {
             </tbody>
           </table>
         </div>
+
+        {/* 예비 등록 모달 */}
+        {reserveOpen && (
+          <div
+            role="dialog"
+            aria-modal="true"
+            style={{
+              position: 'fixed',
+              inset: 0,
+              background: 'rgba(15, 23, 42, 0.55)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: 16,
+              zIndex: 50,
+            }}
+            onMouseDown={(e) => {
+              // 바깥 클릭으로 닫기
+              if (e.target === e.currentTarget) setReserveOpen(false);
+            }}
+          >
+            <div
+              style={{
+                width: 'min(520px, 100%)',
+                background: '#fff',
+                borderRadius: 16,
+                border: '1px solid #e5e7eb',
+                boxShadow: '0 20px 60px rgba(0,0,0,0.25)',
+                overflow: 'hidden',
+              }}
+            >
+              <div style={{ padding: '14px 16px', borderBottom: '1px solid #eef2f7', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div>
+                  <div style={{ fontSize: 16, fontWeight: 950, color: '#0f172a' }}>예비 등록</div>
+                  <div style={{ marginTop: 4, fontSize: 12, color: '#64748b', fontWeight: 800 }}>
+                    마감된 지역만 선택할 수 있습니다. (TO에는 미반영, 개인 한도에는 포함)
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setReserveOpen(false)}
+                  style={{
+                    height: 34,
+                    padding: '0 10px',
+                    borderRadius: 10,
+                    border: '1px solid #e5e7eb',
+                    background: '#fff',
+                    fontWeight: 900,
+                    cursor: 'pointer',
+                  }}
+                >
+                  닫기
+                </button>
+              </div>
+
+              <div style={{ padding: 16, display: 'grid', gap: 12 }}>
+                <div>
+                  <div style={{ fontSize: 12, color: '#64748b', fontWeight: 900, marginBottom: 6 }}>마감된 지역 선택</div>
+                  <select
+                    value={reserveRegionId}
+                    onChange={(e) => setReserveRegionId(e.target.value)}
+                    style={{
+                      width: '100%',
+                      height: 40,
+                      borderRadius: 12,
+                      border: '1px solid #d1d5db',
+                      padding: '0 10px',
+                      fontWeight: 900,
+                    }}
+                  >
+                    {closedRegions.length === 0 ? (
+                      <option value="">마감된 지역이 없습니다</option>
+                    ) : (
+                      closedRegions.map((r) => (
+                        <option key={r.region_id} value={r.region_id}>
+                          {r.region_name}
+                        </option>
+                      ))
+                    )}
+                  </select>
+                </div>
+
+                <div>
+                  <div style={{ fontSize: 12, color: '#64748b', fontWeight: 900, marginBottom: 6 }}>기업명</div>
+                  <input
+                    lang="ko"
+                    inputMode="text"
+                    autoComplete="off"
+                    autoCorrect="off"
+                    autoCapitalize="none"
+                    spellCheck={false}
+                    value={reserveCompany}
+                    onChange={(e) => setReserveCompany(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        if (!busyReserve) submitReserve();
+                      }
+                    }}
+                    placeholder="기업명을 입력하세요"
+                    style={{
+                      width: '100%',
+                      height: 40,
+                      borderRadius: 12,
+                      border: '1px solid #d1d5db',
+                      padding: '0 10px',
+                      fontWeight: 900,
+                    }}
+                  />
+                </div>
+              </div>
+
+              <div style={{ padding: 16, borderTop: '1px solid #eef2f7', display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+                <button type="button" onClick={() => setReserveOpen(false)} style={btnOutline} disabled={busyReserve}>
+                  취소
+                </button>
+                <button
+                  type="button"
+                  onClick={submitReserve}
+                  style={{ ...btnPrimary, height: 38, minWidth: 120 }}
+                  disabled={busyReserve || closedRegions.length === 0 || limitBlocked || groupBlocked}
+                >
+                  {busyReserve ? '등록중…' : '예비 등록'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* 하단 로그아웃(보조) */}
         <div style={{ marginTop: 18, display: 'flex', justifyContent: 'flex-end' }}>
