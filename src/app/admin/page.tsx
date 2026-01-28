@@ -1249,14 +1249,25 @@ const copyBoardAsImage = async () => {
   const filteredApplies = useMemo(() => {
     const q = applyQuery.trim().toLowerCase();
     const regionId = applyRegionFilter;
+
     return (applies ?? []).filter((a) => {
+      // 지역 드롭다운 필터
       if (regionId && a.region_id !== regionId) return false;
+
       if (!q) return true;
+
       const leader = (a.leader_name ?? '').toLowerCase();
       const company = (a.company_name ?? '').toLowerCase();
-      return leader.includes(q) || company.includes(q);
+      const regionName =
+        (regionsMap.get(a.region_id)?.region_name ?? '').toLowerCase();
+
+      return (
+        leader.includes(q) ||
+        company.includes(q) ||
+        regionName.includes(q)
+      );
     });
-  }, [applies, applyQuery, applyRegionFilter]);
+  }, [applies, applyQuery, applyRegionFilter, regionsMap]);
 
   // 로그인 + role 체크 + 초기 로드 + realtime
   useEffect(() => {
@@ -1983,7 +1994,7 @@ const copyBoardAsImage = async () => {
             <select
               value={applyRegionFilter}
               onChange={(e) => setApplyRegionFilter(e.target.value)}
-              style={{ ...input, height: 34, padding: '0 10px', width: 75 }}
+              style={{ ...input, height: 34, padding: '0 10px', width: 66 }}
             >
               <option value="">전체</option>
               {Array.from(regionsMap.values())
@@ -1998,13 +2009,13 @@ const copyBoardAsImage = async () => {
             <input
               value={applyQuery}
               onChange={(e) => setApplyQuery(e.target.value)}
-              placeholder="팀장/기업명 검색"
+              placeholder="지역·팀장·기업명 검색"
               lang="ko"
               inputMode="text"
               autoCapitalize="none"
               autoCorrect="off"
               spellCheck={false}
-              style={{ ...input, height: 34, padding: '0 10px', width: 140 }}
+              style={{ ...input, height: 34, padding: '0 10px', width: 150 }}
             />
 
             <button
