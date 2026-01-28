@@ -592,6 +592,38 @@ const handleToggleReviewed = async (applicationId: string, checked: boolean) => 
     await loadStatus();
   };
 
+  const promoteReserveApply = async (row: LiveApplyRow) => {
+    pushToast('info', '');
+    if (busyDelete) return; // 삭제/리셋 등 대형 작업 중에는 막기
+
+    const rn = regionsMap.get(row.region_id)?.region_name ?? row.region_id;
+    const cn = (row.company_name ?? '').trim();
+
+    const ok = window.confirm(
+      [
+        '예비 등록을 정식 등록 하시겠습니까?',
+        '',
+        `- 지역: ${rn}`,
+        `- 기업명: ${cn || '(미입력)'}`,
+        '',
+        '※ 해당 지역에 TO 잔여가 있을 때만 등록됩니다.',
+      ].join('')
+    );
+    if (!ok) return;
+
+    const { error } = await supabase.rpc('promote_reserve', { p_application_id: row.id });
+    if (error) {
+      // Supabase error message는 그대로 보여주는 게 가장 빠름
+      setErrorMsg(`등록 실패: ${error.message}`);
+      return;
+    }
+
+    pushToast('success', '등록 완료');
+    await Promise.all([loadApplies(), loadStatus(), loadTodayCounts()]);
+  };
+
+
+
   const updateCompanyName = async (id: string) => {
     pushToast('info', '');
     if (busyUpdateCompanyId) return;
@@ -1519,7 +1551,7 @@ const copyBoardAsImage = async () => {
       >
         {/* 좌측: 지역별 TO 테이블 */}
         <div ref={leftTOCardRef} style={{ flex: 1, minWidth: 585, background: '#fff', border: '1px solid #e5e7eb', borderRadius: 14, boxShadow: '0 10px 30px rgba(17, 24, 39, 0.06)', overflow: 'hidden' }}>
-          <div style={{ padding: '10px 12px', borderBottom: '1px solid #eef2f7', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
+          <div style={{ padding: '10px 32px', borderBottom: '1px solid #eef2f7', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, minWidth: 0 }}>
               <div style={{ fontSize: 15, fontWeight: 900, whiteSpace: 'nowrap' }}>지역별 TO</div>
               <div style={{ fontSize: 12, color: '#6b7280', whiteSpace: 'nowrap' }}>입력 · 저장</div>
@@ -1534,7 +1566,7 @@ const copyBoardAsImage = async () => {
               </button>
             </div>
           </div>
-          <div style={{ padding: 12 }}>
+          <div style={{ padding: 14 }}>
           <table
             className="border-collapse"
             style={{
@@ -1547,12 +1579,12 @@ const copyBoardAsImage = async () => {
           >
           <thead>
             <tr style={{ borderBottom: '1px solid #eee' }}>
-              <th style={{ width: 90, padding: '10px 8px', textAlign: 'center' }}>지역</th>
-              <th style={{ width: 140, padding: '10px 8px', textAlign: 'center' }}>총 TO(편집)</th>
-              <th style={{ width: 80, padding: '10px 8px', textAlign: 'center' }}>지원수</th>
-              <th style={{ width: 80, padding: '10px 8px', textAlign: 'center' }}>잔여</th>
-              <th style={{ width: 90, padding: '10px 8px', textAlign: 'center' }}>상태</th>
-              <th style={{ width: 90, padding: '10px 8px', textAlign: 'center' }}>저장</th>
+              <th style={{ width: 90, padding: '10px 12px', textAlign: 'center' }}>지역</th>
+              <th style={{ width: 110, padding: '10px 12px', textAlign: 'center' }}>총 TO(편집)</th>
+              <th style={{ width: 80, padding: '10px 12px', textAlign: 'center' }}>지원수</th>
+              <th style={{ width: 80, padding: '10px 12px', textAlign: 'center' }}>잔여</th>
+              <th style={{ width: 90, padding: '10px 12px', textAlign: 'center' }}>상태</th>
+              <th style={{ width: 90, padding: '10px 12px', textAlign: 'center' }}>저장</th>
             </tr>
           </thead>
 
@@ -1565,7 +1597,7 @@ const copyBoardAsImage = async () => {
                 <tr key={r.region_id} style={{ borderTop: '1px solid #eee' }}>
                   <td style={{ ...td, textAlign: 'center' }}>{r.region_name}</td>
 
-                  <td style={{ padding: '6px 8px', textAlign: 'center' }}>
+                  <td style={{ padding: '6px 12px', textAlign: 'center' }}>
                     <input
                       value={String(total)}
                       onChange={(e) => {
@@ -1787,7 +1819,7 @@ const copyBoardAsImage = async () => {
                     style={{
                       border: '1px solid #eee',
                       borderRadius: 10,
-                      padding: '6px 8px',
+                      padding: '6px 12px',
                       background: isBlocked ? '#fff0f0' : p.is_exempt ? '#fff9e6' : '#fff',
                     }}
                   >
@@ -2324,6 +2356,7 @@ const copyBoardAsImage = async () => {
                 <th style={{ ...thSmall, width: 70 }}>지역</th>
                 <th style={{ ...thSmall, width: 90 }}>팀장</th>
                 <th style={thSmall}>기업명</th>
+                <th style={{ ...thSmall, width: 70, textAlign: 'center' }}>등록</th>
                 <th style={{ ...thSmall, width: 70, textAlign: 'center' }}>삭제</th>
               </tr>
             </thead>
@@ -2359,7 +2392,29 @@ const copyBoardAsImage = async () => {
                         <span style={{ fontWeight: 900 }}>{a.company_name}</span>
                       </span>
                     </td>
+                    
                     <td style={{ ...tdSmall, width: 70, textAlign: 'center' }}>
+                      <button
+                        onClick={() => promoteReserveApply(a)}
+                        style={{
+                            height: 32,
+                            padding: '0 10px',
+                            minWidth: 54,
+                            borderRadius: 10,
+                            border: a.is_excluded ? '1px solid #0f172a' : '1px solid #475569',
+                            background: a.is_excluded ? '#0f172a' : '#ffffff',
+                            color: a.is_excluded ? '#ffffff' : '#0f172a',
+                            fontWeight: 900,
+                            cursor: 'pointer',
+                            opacity: busyDelete ? 0.6 : 1,
+                          }}
+                        disabled={!!busyDelete}
+                        title="예비 등록을 정식으로 등록"
+                      >
+                        등록
+                      </button>
+                    </td>
+                  <td style={{ ...tdSmall, width: 70, textAlign: 'center' }}>
                       <button onClick={() => deleteApply(a)} style={dangerMiniBtn} disabled={busyDelete === a.id}>
                         {busyDelete === a.id ? '삭제중...' : '삭제'}
                       </button>
@@ -2370,7 +2425,7 @@ const copyBoardAsImage = async () => {
 
               {reserveApplies.length === 0 && (
                 <tr>
-                  <td colSpan={5} style={{ padding: 12, color: '#666', textAlign: 'center' }}>
+                  <td colSpan={6} style={{ padding: 12, color: '#666', textAlign: 'center' }}>
                     예비 등록 내역이 없습니다.
                   </td>
                 </tr>
@@ -2438,7 +2493,7 @@ const copyBoardAsImage = async () => {
                           width: '1%',
                           whiteSpace: 'nowrap',
                           fontSize: 11,
-                          padding: '6px 8px',
+                          padding: '6px 12px',
                           textAlign: 'center',
 
                         }}
@@ -2672,6 +2727,8 @@ const rowBtn: React.CSSProperties = {
   background: '#fff',
   fontWeight: 800,
   cursor: 'pointer',
+  maxWidth: '100%',
+  whiteSpace: 'nowrap',
 };
 
 const dangerMiniBtn: React.CSSProperties = {
