@@ -645,8 +645,18 @@ export default function LeaderPage() {
             </div>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <div style={{ fontSize: 12, color: '#475569', fontWeight: 800 }}>{todayText}</div>
+          {/* 하단 로그아웃(보조) */}
+          <div
+            style={{
+              marginTop: 18,
+              display: 'flex',
+              justifyContent: 'flex-end',
+              gap: 10, // ← 여기만 추가
+            }}
+          >
+            <button onClick={() => router.push('/hr/calendar')} style={btnOutline}>
+              휴가신청
+            </button>
             <button
               onClick={async () => {
                 await supabase.auth.signOut();
@@ -1132,7 +1142,17 @@ export default function LeaderPage() {
         )}
 
         {/* 하단 로그아웃(보조) */}
-        <div style={{ marginTop: 18, display: 'flex', justifyContent: 'flex-end' }}>
+        <div
+          style={{
+            marginTop: 18,
+            display: 'flex',
+            justifyContent: 'flex-end',
+            gap: 10, // ← 여기만 추가
+          }}
+        >
+          <button onClick={() => router.push('/hr/calendar')} style={btnOutline}>
+            휴가신청
+          </button>
           <button
             onClick={async () => {
               await supabase.auth.signOut();

@@ -1477,6 +1477,10 @@ const copyBoardAsImage = async () => {
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <div style={{ fontSize: 12, color: '#6b7280' }}>{todayLabel}</div>
+              {/* 휴가 신청(캘린더) 페이지 이동 버튼 */}
+            <button onClick={() => router.push('/hr/calendar')} style={ghostBtn}>
+              휴가신청
+            </button>
             <button onClick={doLogout} style={ghostBtn}>로그아웃</button>
           </div>
         </div>
