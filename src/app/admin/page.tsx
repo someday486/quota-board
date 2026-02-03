@@ -3,6 +3,32 @@
 import { useEffect, useMemo, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
+import AdminHeader from './_components/AdminHeader';
+import HelpBox from './_components/HelpBox';
+import Toasts from './_components/Toasts';
+import ErrorAlert from './_components/ErrorAlert';
+import ApplyList from './_components/ApplyList';
+import ReserveList from './_components/ReserveList';
+import QuotaBoard from './_components/QuotaBoard';
+import { useAdminPage } from './_hooks/useAdminPage';
+import {
+  dangerBtn,
+  dangerMiniBtn,
+  input,
+  miniBtn,
+  miniDangerBtn,
+  miniInput,
+  miniPrimaryBtn,
+  pillClosed,
+  pillOpen,
+  primaryBtn,
+  REGION_BOARD_COLOR,
+  rowBtn,
+  td,
+  tdSmall,
+  th,
+  thSmall,
+} from './styles';
 
 type RegionStatusRow = {
   region_id: string;
@@ -1270,173 +1296,26 @@ const copyBoardAsImage = async () => {
   }, [applies, applyQuery, applyRegionFilter, regionsMap]);
 
   // 로그인 + role 체크 + 초기 로드 + realtime
-  useEffect(() => {
-    let alive = true;
-    let ch: ReturnType<typeof supabase.channel> | null = null;
+  useAdminPage({
+    setAdminUserId,
+    setAdminName,
+    setChecking,
+    loadRegions,
+    loadStatus,
+    loadApplies,
+    loadApplyLimit,
+    loadLeaders,
+    loadExemptUserIds,
+    loadTodayCounts,
+    loadActiveGroup,
+    setApplyLimit,
+    setApplyLimitInput,
+    setExemptUserIds,
+    setActiveGroup,
+    exemptKey: EXEMPT_KEY,
+    groupSettingKey: GROUP_SETTING_KEY,
+  });
 
-    // Realtime 끊김(절전/네트워크 전환 등) 대비
-    let retryTimer: number | null = null;
-    let pollTimer: number | null = null;
-    let uidRef: string | null = null;
-    let onVis: (() => void) | null = null;
-
-    const boot = async () => {
-      // 로그인 체크
-      const { data: userRes, error: userErr } = await supabase.auth.getUser();
-      if (!alive) return;
-
-      if (userErr || !userRes?.user) {
-        router.replace('/login');
-        return;
-      }
-
-      const uid = userRes.user.id;
-      setAdminUserId(uid);
-      uidRef = uid;
-
-      // 관리자 권한 체크(프로젝트마다 다를 수 있어서 role/is_admin 둘 다 대응)
-      const { data: prof, error: profErr } = await supabase
-        .from('profiles')
-        .select('user_id, display_name, role, is_admin, leader_group')
-        .eq('user_id', uid)
-        .maybeSingle();
-
-      if (!alive) return;
-
-      if (profErr || !prof) {
-        router.replace('/login');
-        return;
-      }
-
-      const p = prof as ProfileRow;
-      const isAdmin = p.role === 'admin' || Boolean(p.is_admin);
-
-      if (!isAdmin) {
-        router.replace('/login');
-        return;
-      }
-
-      setAdminName(p.display_name ?? '관리자');
-
-      // 데이터 로드
-      await loadRegions();
-      await Promise.all([
-        loadStatus(),
-        loadApplies(),
-        loadApplyLimit(),
-        loadLeaders(),
-        loadExemptUserIds(),
-        loadTodayCounts(),
-        loadActiveGroup(),
-      ]);
-
-      if (!alive) return;
-
-      const resubscribe = () => {
-        if (!alive) return;
-
-        if (ch) supabase.removeChannel(ch);
-
-        // realtime: region_totals / applications_live / regions / app_settings 변화 즉시 반영
-        ch = supabase
-          .channel(`admin-live-${Date.now()}`)
-          .on('postgres_changes', { event: '*', schema: 'public', table: 'region_totals' }, () => {
-            loadStatus();
-          })
-          .on('postgres_changes', { event: '*', schema: 'public', table: 'applications_live' }, () => {
-            loadApplies();
-            loadStatus();
-            loadTodayCounts();
-          })
-          .on('postgres_changes', { event: '*', schema: 'public', table: 'call_recordings' }, () => {
-            // 녹취 업로드/검수 변경 즉시 반영
-            loadApplies();
-          })
-          .on('postgres_changes', { event: '*', schema: 'public', table: 'regions' }, () => {
-            loadRegions();
-            loadStatus();
-          })
-          .on(
-            'postgres_changes',
-            { event: '*', schema: 'public', table: 'app_settings', filter: 'key=eq.apply_limit_per_user_per_day' },
-            (payload) => {
-              const row = (payload.new ?? payload.old) as any;
-              const v = Number(row?.value_int ?? 0);
-              const safe = Number.isFinite(v) ? Math.max(0, Math.trunc(v)) : 0;
-              setApplyLimit(safe);
-              setApplyLimitInput(String(safe));
-            },
-          )
-          .on(
-            'postgres_changes',
-            { event: '*', schema: 'public', table: 'app_settings', filter: `key=eq.${EXEMPT_KEY}` },
-            (payload) => {
-              const row = (payload.new ?? payload.old) as any;
-              const raw = row?.value_json;
-              const arr = Array.isArray(raw) ? raw : [];
-              setExemptUserIds(arr.map(String));
-            },
-          )
-          .on(
-            'postgres_changes',
-            { event: '*', schema: 'public', table: 'app_settings', filter: `key=eq.${GROUP_SETTING_KEY}` },
-            (payload) => {
-              const row = (payload.new ?? payload.old) as any;
-              const v = Number(row?.value_int ?? 0);
-              const safe = Number.isFinite(v) ? Math.max(0, Math.min(2, Math.trunc(v))) : 0;
-              setActiveGroup(safe);
-            },
-          )
-          .subscribe((status) => {
-            if (status === 'SUBSCRIBED') return;
-            if (status === 'CLOSED' || status === 'TIMED_OUT' || status === 'CHANNEL_ERROR') {
-              if (retryTimer) window.clearTimeout(retryTimer);
-              retryTimer = window.setTimeout(() => {
-                // 재구독 직후 한번 보정(놓친 이벤트 보완)
-                loadStatus();
-                loadApplies();
-                loadTodayCounts();
-                resubscribe();
-              }, 1000);
-            }
-          });
-      };
-
-      // 최초 구독
-      resubscribe();
-
-      // 탭 복귀 시 강제 동기화
-      onVis = () => {
-        if (document.visibilityState === 'visible') {
-          loadStatus();
-          loadApplies();
-          loadTodayCounts();
-        }
-      };
-      document.addEventListener('visibilitychange', onVis);
-
-      // (선택) 30초 폴링 백업
-      pollTimer = window.setInterval(() => {
-        if (!alive) return;
-        loadStatus();
-        loadApplies();
-        loadTodayCounts();
-      }, 30000);
-
-      setChecking(false);
-    };
-
-    boot();
-
-    return () => {
-      alive = false;
-      if (ch) supabase.removeChannel(ch);
-      if (retryTimer) window.clearTimeout(retryTimer);
-      if (pollTimer) window.clearInterval(pollTimer);
-      if (onVis) document.removeEventListener('visibilitychange', onVis);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   if (checking) {
     return (
@@ -1455,102 +1334,17 @@ const copyBoardAsImage = async () => {
           margin: '0 auto',
         }}
       >
-        <div
-          style={{
-            background: '#ffffff',
-            border: '1px solid #e5e7eb',
-            borderRadius: 16,
-            padding: '14px 16px',
-            boxShadow: '0 10px 30px rgba(17, 24, 39, 0.06)',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            gap: 12,
-          }}
-        >
-          <div style={{ minWidth: 0 }}>
-            <div style={{ fontSize: 18, fontWeight: 900, letterSpacing: '-0.2px' }}>관리자 대시보드</div>
-            <div style={{ marginTop: 4, fontSize: 12, color: '#6b7280' }}>
-              현재 운영 관리자: <b style={{ color: '#111827' }}>{adminName}</b>
-            </div>
-          </div>
-
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <div style={{ fontSize: 12, color: '#6b7280' }}>{todayLabel}</div>
-              {/* 휴가 신청(캘린더) 페이지 이동 버튼 */}
-            <button onClick={() => router.push('/hr/calendar')} style={ghostBtn}>
-              휴가신청
-            </button>
-            <button onClick={doLogout} style={ghostBtn}>로그아웃</button>
-          </div>
-        </div>
-
-        {showHelp && (
-          <div style={helpBox}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start' }}>
-              <div style={{ fontSize: 13, color: '#374151', lineHeight: 1.5 }}>
-                <b>운영 안내:</b> 총 TO 입력 후 저장하면 즉시 반영됩니다. <b>초기화</b>는 전체 TO를 0으로 만들고 현재 지원 목록을 모두 삭제합니다.
-                1인당 하루 한도는 공통 제한이며, 팀장 현황에서 <b>예외</b>를 켜면 해당 팀장은 한도 적용을 받지 않습니다. 1인당 하루 한도를 0으로 적용하면 한도가 사라집니다. 오늘 지원조를 설정하면 해당 조만 지원할 수 있게 적용됩니다.
-              </div>
-              <button onClick={() => setShowHelp(false)} style={xBtn} aria-label="닫기">
-                ×
-              </button>
-            </div>
-          </div>
-        )}
-
-        
-        {/* Toasts (success/info) */}
-        <div style={{ position: 'fixed', top: 18, right: 18, zIndex: 50, display: 'flex', flexDirection: 'column', gap: 10, pointerEvents: 'none' }}>
-          {toasts.map((t) => (
-            <div
-              key={t.id}
-              style={{
-                pointerEvents: 'auto',
-                minWidth: 220,
-                maxWidth: 360,
-                background: t.type === 'success' ? '#ecfdf5' : '#eff6ff',
-                border: `1px solid ${t.type === 'success' ? '#a7f3d0' : '#bfdbfe'}`,
-                color: '#111827',
-                borderRadius: 12,
-                padding: '10px 12px',
-                boxShadow: '0 12px 30px rgba(17, 24, 39, 0.12)',
-                fontSize: 13,
-                display: 'flex',
-                justifyContent: 'space-between',
-                gap: 10,
-                alignItems: 'flex-start',
-              }}
-            >
-              <div style={{ lineHeight: 1.4 }}>{t.text}</div>
-              <button
-                onClick={() => setToasts((prev) => prev.filter((x) => x.id !== t.id))}
-                style={{ ...xBtn, pointerEvents: 'auto' }}
-                aria-label="닫기"
-              >
-                ×
-              </button>
-            </div>
-          ))}
-        </div>
+        <AdminHeader
+          adminName={adminName}
+          todayLabel={todayLabel}
+          onGoHr={() => router.push('/hr/calendar')}
+          onLogout={doLogout}
+        />
+        {showHelp && <HelpBox onClose={() => setShowHelp(false)} />}
+        <Toasts toasts={toasts} onClose={(id) => setToasts((prev) => prev.filter((x) => x.id !== id))} />
 
         {/* Error alert (only errors) */}
-        {errorMsg && (
-          <div
-            style={{
-              ...alertBox,
-              display: 'flex',
-              justifyContent: 'space-between',
-              gap: 12,
-              alignItems: 'flex-start',
-            }}
-          >
-            <div style={{ lineHeight: 1.5 }}>{errorMsg}</div>
-            <button onClick={() => setErrorMsg('')} style={xBtn} aria-label="닫기">
-              ×
-            </button>
-          </div>
-        )}
+        <ErrorAlert message={errorMsg} onClose={() => setErrorMsg('')} />
 
         {/* 지역별 TO + 팀장 현황 (헤더 내부에 액션 배치) */}
       <div
@@ -1962,812 +1756,63 @@ const copyBoardAsImage = async () => {
         </div>
       </div>
 
-      {/* 팀장 지원 목록(현재 / 삭제 가능) */}
-      <div
-        style={{
-          marginTop: 18,
-          width: '100%',
-          maxWidth: 1400,
-          border: '1px solid #e5e7eb',
-          borderRadius: 14,
-          overflowX: 'auto',
-          overflowY: 'hidden',
-          background: '#fff',
-          boxShadow: '0 10px 30px rgba(17, 24, 39, 0.06)',
-          display: 'flex',
-          flexDirection: 'column',
+      <ApplyList
+        filteredApplies={filteredApplies}
+        regionsMap={regionsMap}
+        applyRegionFilter={applyRegionFilter}
+        setApplyRegionFilter={setApplyRegionFilter}
+        applyQuery={applyQuery}
+        setApplyQuery={setApplyQuery}
+        onResetFilter={() => {
+          setApplyQuery('');
+          setApplyRegionFilter('');
         }}
-      >
-        <div
-          style={{
-            padding: '10px 12px',
-            background: 'linear-gradient(180deg, #f9fafb 0%, #f3f4f6 100%)',
-            borderBottom: '1px solid #eee',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            gap: 10,
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
-            <div style={{ fontSize: 15, fontWeight: 900 }}>팀장 지원 목록</div>
-            <div style={{ fontSize: 12, color: '#6b7280' }}>현재 · 삭제 가능</div>
-          </div>
+        editingCompanyId={editingCompanyId}
+        setEditingCompanyId={setEditingCompanyId}
+        companyInputById={companyInputById}
+        setCompanyInputById={setCompanyInputById}
+        isComposingCompanyById={isComposingCompanyById}
+        setIsComposingCompanyById={setIsComposingCompanyById}
+        busyUpdateCompanyId={busyUpdateCompanyId}
+        updateCompanyName={updateCompanyName}
+        recordingsByAppId={recordingsByAppId}
+        uploadingByAppId={uploadingByAppId}
+        dragOverAppId={dragOverAppId}
+        setDragOverAppId={setDragOverAppId}
+        audioUrlByAppId={audioUrlByAppId}
+        openPlayerAppId={openPlayerAppId}
+        handleUploadRecording={handleUploadRecording}
+        handlePlayRecording={handlePlayRecording}
+        handleDeleteRecording={handleDeleteRecording}
+        handleToggleReviewed={handleToggleReviewed}
+        toggleExcludeApply={toggleExcludeApply}
+        deleteApply={deleteApply}
+        busyDelete={busyDelete}
+        formatDateTime={fmtDT}
+      />
 
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-            <select
-              value={applyRegionFilter}
-              onChange={(e) => setApplyRegionFilter(e.target.value)}
-              style={{ ...input, height: 34, padding: '0 10px', width: 66 }}
-            >
-              <option value="">전체</option>
-              {Array.from(regionsMap.values())
-                .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
-                .map((r) => (
-                  <option key={r.id} value={r.id}>
-                    {r.region_name}
-                  </option>
-                ))}
-            </select>
+      <ReserveList
+        reserveApplies={reserveApplies}
+        regionsMap={regionsMap}
+        promoteReserveApply={promoteReserveApply}
+        deleteApply={deleteApply}
+        busyDelete={busyDelete}
+        formatDateTime={fmtDT}
+      />
 
-            <input
-              value={applyQuery}
-              onChange={(e) => setApplyQuery(e.target.value)}
-              placeholder="지역·팀장·기업명 검색"
-              lang="ko"
-              inputMode="text"
-              autoCapitalize="none"
-              autoCorrect="off"
-              spellCheck={false}
-              style={{ ...input, height: 34, padding: '0 10px', width: 150 }}
-            />
-
-            <button
-              onClick={() => {
-                setApplyQuery('');
-                setApplyRegionFilter('');
-              }}
-              style={{ ...rowBtn, height: 34, padding: '0 10px', opacity: applyQuery || applyRegionFilter ? 1 : 0.6 }}
-              disabled={!applyQuery && !applyRegionFilter}
-            >
-              초기화
-            </button>
-          </div>
-        </div>
-
-        <div style={{ padding: 12 }}>
-          <div style={{ maxHeight: 420, overflowY: 'auto', border: '1px solid #e5e7eb', borderRadius: 10 }}>
-            <table
-              style={{
-                borderCollapse: 'collapse',
-                fontSize: 14,
-                tableLayout: 'fixed',
-                width: '100%',
-              }}
-            >
-              <thead>
-                <tr style={{ background: '#f6f7f9', borderBottom: '1px solid #eee' }}>
-                  <th style={{ ...thSmall, width: 140, textAlign: 'center' }}>시간</th>
-                  <th style={{ ...thSmall, width: 70, textAlign: 'center' }}>지역</th>
-                  <th style={{ ...thSmall, width: 90, textAlign: 'center' }}>팀장</th>
-                  <th style={{ ...thSmall }}>기업명</th>
-                  <th style={{ ...thSmall, width: 310, textAlign: 'center' }}>녹취</th>
-                  <th style={{ ...thSmall, width: 90, textAlign: 'center' }}>검수</th>
-                  <th style={{ ...thSmall, width: 70, textAlign: 'center' }}>제외</th>
-                  <th style={{ ...thSmall, width: 70, textAlign: 'center' }}>삭제</th>
-                </tr>
-              </thead>
-
-              <tbody>
-                {filteredApplies.map((a) => {
-                  const rn = regionsMap.get(a.region_id)?.region_name ?? a.region_id;
-                  return (
-                    <tr key={a.id} style={{ borderTop: '1px solid #eee', background: a.is_excluded ? '#f8fafc' : '#ffffff' }}>
-                      <td style={{ ...tdSmall, width: 140, textAlign: 'center' }}>{new Date(a.created_at).toLocaleString()}</td>
-                      <td style={{ ...tdSmall, width: 70, textAlign: 'center' }}>{rn}</td>
-                      <td style={{ ...tdSmall, width: 90, textAlign: 'center' }}>
-                        <b>{a.leader_name}</b>
-                      </td>
-                      <td
-                        style={{
-                          ...tdSmall,
-                          minWidth: 260,
-                          ...(editingCompanyId === a.id
-                            ? { whiteSpace: 'normal', overflow: 'hidden', textOverflow: 'clip' }
-                            : { whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }),
-                        }}
-                        title={a.company_name}
-                      >
-                        {editingCompanyId === a.id ? (
-                          <div style={{ display: 'flex', gap: 6, alignItems: 'center', width: '100%' }}>
-                            <input
-                              value={companyInputById[a.id] ?? a.company_name ?? ''}
-                              onChange={(e) => setCompanyInputById((p) => ({ ...p, [a.id]: e.target.value }))}
-                              onCompositionStart={() =>
-                                setIsComposingCompanyById((p) => ({ ...p, [a.id]: true }))
-                              }
-                              onCompositionEnd={(e) => {
-                                setIsComposingCompanyById((p) => ({ ...p, [a.id]: false }));
-                                // 조합 완료 시 최종 값을 확정 저장
-                                setCompanyInputById((p) => ({ ...p, [a.id]: (e.target as HTMLInputElement).value }));
-                              }}
-                              style={{
-                                ...input,
-                                height: 32,
-                                width: 'auto',
-                                flex: 1,
-                                minWidth: 0,
-                                maxWidth: 'none',
-                                textAlign: 'left',
-                              }}
-                              placeholder="기업명 수정"
-                              lang="ko"
-                              inputMode="text"
-                              autoCapitalize="none"
-                              autoCorrect="off"
-                              spellCheck={false}
-                            />
-                            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                              <button
-                                onClick={() => updateCompanyName(a.id)}
-                                style={rowBtn}
-                                disabled={busyUpdateCompanyId === a.id || !!isComposingCompanyById[a.id]}
-                              >
-                                {busyUpdateCompanyId === a.id ? '저장중...' : '저장'}
-                              </button>
-                              <button onClick={() => setEditingCompanyId(null)} style={rowBtn}>
-                                취소
-                              </button>
-                            </div>
-                          </div>
-                        ) : (
-                          <div style={{ display: 'flex', gap: 8, alignItems: 'center', width: '100%' }}>
-                            <span
-                              title={a.company_name ?? ''}
-                              style={{
-                                flex: 1,
-                                minWidth: 0,              // 중요: 말줄임이 동작하려면 필요
-                                overflow: 'hidden',
-                                textOverflow: 'ellipsis',
-                                whiteSpace: 'nowrap',
-                              }}
-                            >
-                              {a.company_name}
-                            </span>
-
-                            <button
-                              onClick={() => {
-                                setEditingCompanyId(a.id);
-                                setCompanyInputById((p) => ({ ...p, [a.id]: a.company_name ?? '' }));
-                              }}
-                              style={{ ...rowBtn, flex: '0 0 auto' }} // 버튼은 줄어들지 않게
-                            >
-                              수정
-                            </button>
-                          </div>
-                        )}
-                      </td>
-
-                      {/* ✅ 녹취 업로드/재생 */}
-                      <td style={{ ...tdSmall, width: 310 }}>
-                        {(() => {
-                          const rec = recordingsByAppId[a.id];
-                          const uploading = !!uploadingByAppId[a.id];
-                          const dragOn = dragOverAppId === a.id;
-                          const audioUrl = audioUrlByAppId[a.id];
-                          const isOpen = openPlayerAppId === a.id;
-
-                          return (
-                            <div
-                              onDragOver={(e) => {
-                                e.preventDefault();
-                                setDragOverAppId(a.id);
-                              }}
-                              onDragLeave={() => setDragOverAppId(null)}
-                              onDrop={(e) => {
-                                e.preventDefault();
-                                setDragOverAppId(null);
-                                const file = e.dataTransfer.files?.[0];
-                                if (file) handleUploadRecording(a.id, file);
-                              }}
-                              style={{
-                                border: `1px dashed ${dragOn ? '#60a5fa' : '#cbd5e1'}`,
-                                background: dragOn ? '#eff6ff' : '#f8fafc',
-                                borderRadius: 10,
-                                padding: '8px 10px',
-                              }}
-                            >
-                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
-                                <div style={{ minWidth: 0 }}>
-                                  <div style={{ fontSize: 12, fontWeight: 900, color: '#0f172a' }}>
-                                    {rec ? '등록됨' : '미등록'}
-                                    {uploading ? ' · 업로드중…' : ''}
-                                  </div>
-                                  <div
-                                    style={{
-                                      marginTop: 2,
-                                      fontSize: 12,
-                                      color: '#475569',
-                                      fontWeight: 700,
-                                      whiteSpace: 'nowrap',
-                                      overflow: 'hidden',
-                                      textOverflow: 'ellipsis',
-                                      maxWidth: 210,
-                                    }}
-                                    title={rec?.file_name ?? ''}
-                                  >
-                                    {rec?.file_name ?? '여기로 파일을 끌어다 놓거나 업로드 버튼을 누르세요'}
-                                  </div>
-                                </div>
-
-                                <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
-                                  <input
-                                    id={`rec-${a.id}`}
-                                    type="file"
-                                    accept="audio/*"
-                                    style={{ display: 'none' }}
-                                    onChange={(e) => {
-                                      const f = e.target.files?.[0];
-                                      if (f) handleUploadRecording(a.id, f);
-                                      e.currentTarget.value = '';
-                                    }}
-                                  />
-                                  <button
-                                    type="button"
-                                    disabled={uploading}
-                                    onClick={() => (document.getElementById(`rec-${a.id}`) as HTMLInputElement | null)?.click()}
-                                    style={{
-                                      height: 30,
-                                      padding: '0 10px',
-                                      borderRadius: 8,
-                                      border: '1px solid #333',
-                                      background: '#fff',
-                                      fontWeight: 900,
-                                      cursor: uploading ? 'not-allowed' : 'pointer',
-                                      fontSize: 12,
-                                      opacity: uploading ? 0.6 : 1,
-                                    }}
-                                  >
-                                    {uploading ? '업로드중' : '업로드'}
-                                  </button>
-
-                                  <button
-                                    type="button"
-                                    disabled={!rec}
-                                    onClick={() => handlePlayRecording(a.id)}
-                                    style={{
-                                      height: 30,
-                                      padding: '0 10px',
-                                      borderRadius: 8,
-                                      border: '1px solid #333',
-                                      background: '#fff',
-                                      fontWeight: 900,
-                                      cursor: rec ? 'pointer' : 'not-allowed',
-                                      fontSize: 12,
-                                      opacity: rec ? 1 : 0.5,
-                                    }}
-                                  >
-                                    {isOpen ? '접기' : '재생'}
-                                  </button>
-
-                                  <button
-                                    type="button"
-                                    disabled={!rec || uploading}
-                                    onClick={() => handleDeleteRecording(a.id)}
-                                    style={{
-                                      height: 30,
-                                      padding: '0 10px',
-                                      borderRadius: 8,
-                                      border: '1px solid #b91c1c',
-                                      background: '#fff0f0',
-                                      color: '#b91c1c',
-                                      fontWeight: 900,
-                                      cursor: !rec || uploading ? 'not-allowed' : 'pointer',
-                                      fontSize: 12,
-                                      opacity: !rec || uploading ? 0.5 : 1,
-                                    }}
-                                  >
-                                    삭제
-                                  </button>
-                                </div>
-                              </div>
-
-                              {isOpen && audioUrl && (
-                                <div style={{ marginTop: 8 }}>
-                                  <audio controls src={audioUrl} style={{ width: '100%' }} />
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })()}
-                      </td>
-
-                      {/* ✅ 검수 완료 체크 */}
-                      <td style={{ ...tdSmall, width: 90, textAlign: 'center' }}>
-                        {(() => {
-                          const rec = recordingsByAppId[a.id];
-                          const checked = !!rec?.reviewed;
-
-                          return (
-                            <label
-                              style={{
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                gap: 8,
-                                cursor: rec ? 'pointer' : 'not-allowed',
-                                userSelect: 'none',
-                              }}
-                            >
-                              <input
-                                type="checkbox"
-                                checked={checked}
-                                disabled={!rec}
-                                onChange={(e) => handleToggleReviewed(a.id, e.target.checked)}
-                              />
-                              <span style={{ fontSize: 13, fontWeight: 900, color: checked ? '#166534' : '#64748b' }}>
-                                {checked ? '완료' : '미완료'}
-                              </span>
-                            </label>
-                          );
-                        })()}
-                      </td>
-
-                      <td style={{ ...tdSmall, width: 70, textAlign: 'center' }}>
-                        <button
-                          onClick={() => toggleExcludeApply(a)}
-                          style={{
-                            height: 32,
-                            padding: '0 10px',
-                            minWidth: 54,
-                            borderRadius: 10,
-                            border: a.is_excluded ? '1px solid #0f172a' : '1px solid #475569',
-                            background: a.is_excluded ? '#0f172a' : '#ffffff',
-                            color: a.is_excluded ? '#ffffff' : '#0f172a',
-                            fontWeight: 900,
-                            cursor: 'pointer',
-                            opacity: busyDelete ? 0.6 : 1,
-                          }}
-                          disabled={!!busyDelete}
-                          title={a.is_excluded ? '현재 제외 상태(클릭하면 해제)' : '클릭하면 제외 처리'}
-                        >
-                          {a.is_excluded ? '해제' : '제외'}
-                        </button>
-                      </td>
-
-                      <td style={{ ...tdSmall, width: 70, textAlign: 'center' }}>
-                        <button onClick={() => deleteApply(a)} style={dangerMiniBtn} disabled={busyDelete === a.id}>
-                          {busyDelete === a.id ? '삭제중...' : '삭제'}
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-
-                {filteredApplies.length === 0 && (
-                  <tr>
-                    <td colSpan={8} style={{ padding: 12, color: '#666', textAlign: 'center' }}>
-                      표시할 지원 내역이 없습니다.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-
-      {/* ✅ 예비 등록 목록 (TO 미반영 / 개인 한도는 포함) */}
-      <div style={{ marginTop: 26 }}>
-        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12, marginBottom: 8 }}>
-          <h2 style={{ margin: 0 }}>예비 등록 목록</h2>
-          <div style={{ fontSize: 12, color: '#64748b' }}>총 {reserveApplies.length}건</div>
-        </div>
-
-        <div style={{ border: '1px solid #ddd', borderRadius: 10, overflow: 'hidden', maxWidth: 1100, background: '#fff' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
-            <thead>
-              <tr style={{ background: '#f6f7f9' }}>
-                <th style={{ ...thSmall, width: 140 }}>시간</th>
-                <th style={{ ...thSmall, width: 70 }}>지역</th>
-                <th style={{ ...thSmall, width: 90 }}>팀장</th>
-                <th style={thSmall}>기업명</th>
-                <th style={{ ...thSmall, width: 70, textAlign: 'center' }}>등록</th>
-                <th style={{ ...thSmall, width: 70, textAlign: 'center' }}>삭제</th>
-              </tr>
-            </thead>
-            <tbody>
-              {reserveApplies.map((a) => {
-                const rn = regionsMap.get(a.region_id)?.region_name ?? a.region_id;
-                return (
-                  <tr key={a.id} style={{ borderTop: '1px solid #eee' }}>
-                    <td style={{ ...tdSmall, width: 140, whiteSpace: 'nowrap' }}>{fmtDT(a.created_at)}</td>
-                    <td style={{ ...tdSmall, width: 70, whiteSpace: 'nowrap' }}>{rn}</td>
-                    <td style={{ ...tdSmall, width: 90, whiteSpace: 'nowrap', fontWeight: 900 }}>{a.leader_name}</td>
-                    <td style={{ ...tdSmall }}>
-                      <span style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: 8,
-                        flexWrap: 'wrap',
-                      }}>
-                        <span
-                          style={{
-                            display: 'inline-block',
-                            padding: '2px 8px',
-                            borderRadius: 999,
-                            fontSize: 12,
-                            fontWeight: 900,
-                            background: '#fff7ed',
-                            border: '1px solid #fdba74',
-                            color: '#9a3412',
-                          }}
-                        >
-                          예비
-                        </span>
-                        <span style={{ fontWeight: 900 }}>{a.company_name}</span>
-                      </span>
-                    </td>
-                    
-                    <td style={{ ...tdSmall, width: 70, textAlign: 'center' }}>
-                      <button
-                        onClick={() => promoteReserveApply(a)}
-                        style={{
-                            height: 32,
-                            padding: '0 10px',
-                            minWidth: 54,
-                            borderRadius: 10,
-                            border: a.is_excluded ? '1px solid #0f172a' : '1px solid #475569',
-                            background: a.is_excluded ? '#0f172a' : '#ffffff',
-                            color: a.is_excluded ? '#ffffff' : '#0f172a',
-                            fontWeight: 900,
-                            cursor: 'pointer',
-                            opacity: busyDelete ? 0.6 : 1,
-                          }}
-                        disabled={!!busyDelete}
-                        title="예비 등록을 정식으로 등록"
-                      >
-                        등록
-                      </button>
-                    </td>
-                  <td style={{ ...tdSmall, width: 70, textAlign: 'center' }}>
-                      <button onClick={() => deleteApply(a)} style={dangerMiniBtn} disabled={busyDelete === a.id}>
-                        {busyDelete === a.id ? '삭제중...' : '삭제'}
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
-
-              {reserveApplies.length === 0 && (
-                <tr>
-                  <td colSpan={6} style={{ padding: 12, color: '#666', textAlign: 'center' }}>
-                    예비 등록 내역이 없습니다.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* ✅ 지역별 지원 보드(캡쳐형) 헤더 */}
-      <div
-        style={{
-          marginTop: 26,
-          marginBottom: 10,
-          display: 'flex',
-          alignItems: 'center',
-          gap: 10, // 제목-버튼 간격
-        }}
-      >
-        <h2 style={{ margin: 0 }}>지역별 지원 보드(현재)</h2>
-
-        <button
-          onClick={copyBoardAsImage}
-          style={rowBtn}
-          disabled={busyCopyBoard}
-        >
-          {busyCopyBoard ? '복사중...' : '보드 이미지 복사'}
-        </button>
-      </div>
-      <div>
-        <div style={{ overflowX: 'auto' }}>
-          <div
-            ref={boardRef}
-            style={{
-              display: 'inline-block',
-              border: '1px solid #ddd',
-              borderRadius: 10,
-              overflow: 'hidden',
-            }}
-          > 
-            <table style={{ borderCollapse: 'collapse', width: 'max-content', fontSize: 12 }}>
-              <thead>
-                <tr style={{ background: '#f6f7f9' }}>
-                  <th style={{ ...thTiny}}>지역 / 건수</th>
-                  {Array.from({ length: boardMaxCols }).map((_, i) => (
-                    <th key={i} style={{ ...thTiny, minWidth: 160, textAlign: 'center' }}>
-                      {i + 1}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {regionsOrdered.map((r) => {
-                  const cells = boardByRegionId.get(r.id) ?? [];
-                  const total = cells.length;
-                  if (total === 0) return null;
-                  return (
-                    <tr key={r.id} style={{ borderTop: '1px solid #eee' }}>
-                      <td
-                        style={{
-                          ...tdTiny,
-                          fontWeight: 900,
-                          background: REGION_BOARD_COLOR[r.name] ?? '#fafafa',
-                          borderRight: '1px solid #ddd',
-                          width: '1%',
-                          whiteSpace: 'nowrap',
-                          fontSize: 11,
-                          padding: '6px 12px',
-                          textAlign: 'center',
-
-                        }}
-                      >
-                        {r.name} / {total}
-                      </td>
-
-                      {Array.from({ length: boardMaxCols }).map((_, idx) => {
-                        const c = cells[idx];
-                        return (
-                          <td key={idx} style={{ ...tdTiny, verticalAlign: 'top' }}>
-                            {c ? (
-                              <div style={{ lineHeight: 1.35, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                                <div style={{ fontWeight: 900 }}>{c.leader_name}</div>
-                                <div style={{ color: '#333' }}>{c.company_name}</div>
-                              </div>
-                            ) : (
-                              <div style={{ color: '#bbb' }}>-</div>
-                            )}
-                          </td>
-                        );
-                      })}
-                    </tr>
-                  );
-                })}
-
-                {regionsOrdered.length === 0 && (
-                  <tr>
-                    <td colSpan={boardMaxCols + 1} style={{ padding: 12, color: '#666' }}>
-                      regions 데이터가 없습니다.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div> 
-          </div>
+      <QuotaBoard
+        boardRef={boardRef}
+        busyCopyBoard={busyCopyBoard}
+        copyBoardAsImage={copyBoardAsImage}
+        boardMaxCols={boardMaxCols}
+        regionsOrdered={regionsOrdered}
+        boardByRegionId={boardByRegionId}
+      />
+    </div>
 </main>
   );
-}
-
-/* styles */
-const alertBox: React.CSSProperties = {
-  marginTop: 10,
-  padding: '10px 12px',
-  border: '1px solid #f1c0c0',
-  background: '#fff5f5',
-  color: '#b40000',
-  borderRadius: 8,
 };
 
-const th: React.CSSProperties = {
-  padding: '12px 12px',
-  textAlign: 'left',
-  fontWeight: 800,
-  borderBottom: '1px solid #e6e6e6',
-};
-
-const td: React.CSSProperties = {
-  padding: '12px 12px',
-  verticalAlign: 'middle',
-};
-
-const thSmall: React.CSSProperties = {
-  padding: '10px 10px',
-  textAlign: 'left',
-  fontWeight: 800,
-  borderBottom: '1px solid #e6e6e6',
-};
-
-const tdSmall: React.CSSProperties = {
-  padding: '10px 10px',
-};
-
-const thTiny: React.CSSProperties = {
-  padding: '8px 8px',
-  textAlign: 'center',
-  fontWeight: 800,
-  borderBottom: '1px solid #e6e6e6',
-  whiteSpace: 'nowrap',
-};
-
-const tdTiny: React.CSSProperties = {
-  padding: '8px 8px',
-  whiteSpace: 'nowrap',
-  textAlign: 'center',
-  verticalAlign: 'middle',
-};
-
-const input: React.CSSProperties = {
-  width: 90,
-  height: 36,
-  padding: '0 10px',
-  fontSize: 14,
-  border: '1px solid #ccc',
-  borderRadius: 8,
-  textAlign: 'right',
-};
-
-const pillOpen: React.CSSProperties = {
-  display: 'inline-block',
-  padding: '4px 10px',
-  borderRadius: 999,
-  border: '1px solid #cfe9d6',
-  background: '#f0fff4',
-  fontWeight: 800,
-  fontSize: 12,
-};
-
-const pillClosed: React.CSSProperties = {
-  display: 'inline-block',
-  padding: '4px 10px',
-  borderRadius: 999,
-  border: '1px solid #f0c3c3',
-  background: '#fff0f0',
-  color: '#b40000',
-  fontWeight: 900,
-  fontSize: 12,
-};
-
-const primaryBtn: React.CSSProperties = {
-  height: 40,
-  padding: '0 14px',
-  borderRadius: 10,
-  border: '1px solid #111',
-  background: '#111',
-  color: '#fff',
-  fontWeight: 800,
-  cursor: 'pointer',
-};
-
-const dangerBtn: React.CSSProperties = {
-  height: 40,
-  padding: '0 14px',
-  borderRadius: 10,
-  border: '1px solid #b40000',
-  background: '#fff0f0',
-  color: '#b40000',
-  fontWeight: 900,
-  cursor: 'pointer',
-};
-
-const ghostBtn: React.CSSProperties = {
-  height: 40,
-  padding: '0 14px',
-  borderRadius: 10,
-  border: '1px solid #333',
-  background: '#fff',
-  fontWeight: 800,
-  cursor: 'pointer',
-};
-
-const helpBox: React.CSSProperties = {
-  marginTop: 18,
-  background: '#ffffff',
-  border: '1px solid #e5e7eb',
-  borderRadius: 14,
-  padding: '12px 14px',
-  boxShadow: '0 10px 30px rgba(17, 24, 39, 0.05)',
-};
-
-const xBtn: React.CSSProperties = {
-  width: 28,
-  height: 28,
-  borderRadius: 10,
-  border: '1px solid #e5e7eb',
-  background: '#fff',
-  cursor: 'pointer',
-  fontWeight: 900,
-  lineHeight: '26px',
-  textAlign: 'center',
-  color: '#6b7280',
-};
-
-
-const miniInput: React.CSSProperties = {
-  height: 28,
-  width: 90,
-  padding: '0 10px',
-  borderRadius: 8,
-  border: '1px solid #ccc',
-  fontSize: 13,
-};
-
-const miniBtn: React.CSSProperties = {
-  height: 28,
-  padding: '0 10px',
-  borderRadius: 8,
-  border: '1px solid #333',
-  background: '#fff',
-  fontWeight: 800,
-  cursor: 'pointer',
-  fontSize: 13,
-};
-
-
-const miniPrimaryBtn: React.CSSProperties = {
-  height: 30,
-  padding: '0 10px',
-                            minWidth: 54,
-  borderRadius: 10,
-  border: '1px solid #111',
-  background: '#111',
-  color: '#fff',
-  fontWeight: 900,
-  cursor: 'pointer',
-  fontSize: 13,
-};
-
-const miniDangerBtn: React.CSSProperties = {
-  height: 30,
-  padding: '0 10px',
-                            minWidth: 54,
-  borderRadius: 10,
-  border: '1px solid #b40000',
-  background: '#fff0f0',
-  color: '#b40000',
-  fontWeight: 900,
-  cursor: 'pointer',
-  fontSize: 13,
-};
-
-
-const rowBtn: React.CSSProperties = {
-  height: 36,
-  padding: '0 14px',
-  borderRadius: 10,
-  border: '1px solid #333',
-  background: '#fff',
-  fontWeight: 800,
-  cursor: 'pointer',
-  maxWidth: '100%',
-  whiteSpace: 'nowrap',
-};
-
-const dangerMiniBtn: React.CSSProperties = {
-  height: 32,
-  padding: '0 10px',
-                            minWidth: 54,
-  borderRadius: 10,
-  border: '1px solid #b40000',
-  background: '#fff0f0',
-  color: '#b40000',
-  fontWeight: 900,
-  cursor: 'pointer',
-};
-
-// 지역별 보드 색상 (캡쳐용)
-const REGION_BOARD_COLOR: Record<string, string> = {
-  '부산': '#CFE8C5', // 연녹색
-  '대구': '#FFD6F0', // 연핑크
-  '대전': '#E3ECF9', // 연블루
-  '전북': '#FFF200', // 노랑
-  '광주': '#FFD9B3', // 살구
-  '원주': '#00F5F5', // 민트
-  '제주': '#E0E0E0', // 회색
-};
 
 function fitText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number) {
   if (!text) return '';
