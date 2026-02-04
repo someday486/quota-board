@@ -614,6 +614,35 @@ const handleToggleReviewed = async (applicationId: string, checked: boolean) => 
     }
 
     pushToast('success', next ? '제외 처리 완료' : '제외 해제 완료');
+    if (next) {
+      let promoted = false;
+      const { data: reservePick, error: reservePickErr } = await supabase
+        .from('applications_live')
+        .select('id')
+        .eq('is_reserve', true)
+        .eq('region_id', row.region_id)
+        .order('created_at', { ascending: true })
+        .limit(1)
+        .maybeSingle();
+
+      if (reservePickErr) {
+        setErrorMsg(`예비 자동 선택 실패: ${reservePickErr.message}`);
+      } else if (reservePick?.id) {
+        const { error: promoteErr } = await supabase.rpc('promote_reserve', { p_application_id: reservePick.id });
+        if (promoteErr) {
+          setErrorMsg(`예비 자동 등록 실패: ${promoteErr.message}`);
+        } else {
+          promoted = true;
+          pushToast('success', '예비 자동 등록 완료');
+        }
+      }
+
+      if (promoted) {
+        await Promise.all([loadApplies(), loadStatus(), loadTodayCounts()]);
+        return;
+      }
+    }
+
     // region_status_view는 DB에서 집계하므로 재조회
     await loadStatus();
   };
