@@ -45,6 +45,12 @@ type AdminBalanceRow = {
   remaining_days: number;
 };
 
+type AdminUserRow = {
+  user_id: string;
+  display_name: string;
+  role: string;
+};
+
 type WeeklyRow = {
   id: string;
   display_name: string;
@@ -174,6 +180,7 @@ export default function Page() {
   const [reqEnd, setReqEnd] = useState('');
   const [reqReason, setReqReason] = useState('');
   const [reqSubmitting, setReqSubmitting] = useState(false);
+  const [reqUserId, setReqUserId] = useState<string>('');
 
   // dashboard common
   const [myBalance, setMyBalance] = useState<MyBalance | null>(null);
@@ -181,6 +188,7 @@ export default function Page() {
 
   // admin dashboard
   const [adminBalances, setAdminBalances] = useState<AdminBalanceRow[]>([]);
+  const [adminUsers, setAdminUsers] = useState<AdminUserRow[]>([]);
   const [weekKey, setWeekKey] = useState<string>(''); // e.g. 2026-W06
   const [weeklyRows, setWeeklyRows] = useState<WeeklyRow[]>([]);
   const [weekYear, setWeekYear] = useState<number>(new Date().getFullYear()); // 옵션 년도
@@ -297,6 +305,21 @@ export default function Page() {
     setAdminBalances((data ?? []) as AdminBalanceRow[]);
   }
 
+  async function fetchAdminUsers() {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('user_id,display_name,role')
+      .order('display_name', { ascending: true });
+
+    if (error) {
+      console.error(error);
+      setAdminUsers([]);
+      return;
+    }
+
+    setAdminUsers((data ?? []) as AdminUserRow[]);
+  }
+
   async function fetchWeeklyLeaves(key: string) {
     const [y, w] = key.split('-W');
     const iso_year = Number(y);
@@ -332,6 +355,7 @@ export default function Page() {
 
     if (isAdmin) {
       await fetchAdminBalances();
+      await fetchAdminUsers();
       if (weekKey) await fetchWeeklyLeaves(weekKey);
     }
   }
@@ -371,9 +395,8 @@ export default function Page() {
 
   // -------- request modal logic --------
   function openRequestModal(dateStr: string) {
-    // ✅ 관리자 신청 금지(프론트 차단)
-    if (isAdmin) {
-      alert('관리자 계정은 휴가 신청이 불가합니다.');
+    if (isAdmin && adminUsers.length === 0) {
+      alert('사용자 목록이 없어 휴가를 등록할 수 없습니다.');
       return;
     }
     if (isWeekend(dateStr)) {
@@ -384,6 +407,10 @@ export default function Page() {
     setReqStart(dateStr);
     setReqEnd(dateStr);
     setReqReason('');
+    if (isAdmin) {
+      const meRow = adminUsers.find((u) => u.user_id === me?.id);
+      setReqUserId(meRow?.user_id ?? adminUsers[0]?.user_id ?? '');
+    }
     setReqOpen(true);
   }
 
@@ -393,10 +420,60 @@ export default function Page() {
     return weekdaysBetween(reqStart, reqEnd);
   }
 
+  async function submitAdminRequest() {
+    if (!reqUserId) {
+      alert('대상 사용자를 선택해 주세요.');
+      return;
+    }
+
+    if (!reqStart || !reqEnd) {
+      alert('날짜를 입력해 주세요.');
+      return;
+    }
+
+    if (reqType !== 'annual') {
+      if (reqStart !== reqEnd) {
+        alert('반차는 하루만 선택 가능합니다.');
+        return;
+      }
+      if (isWeekend(reqStart)) {
+        alert('주말에는 반차를 등록할 수 없습니다.');
+        return;
+      }
+    } else {
+      if (weekdaysBetween(reqStart, reqEnd) <= 0) {
+        alert('선택한 기간에 평일이 없습니다.');
+        return;
+      }
+    }
+
+    const daysCount = reqType === 'annual' ? weekdaysBetween(reqStart, reqEnd) : 0.5;
+
+    setReqSubmitting(true);
+
+    const { error } = await supabase.rpc('request_leave_admin', {
+      p_user_id: reqUserId,
+      p_leave_type: reqType,
+      p_start_date: reqStart,
+      p_end_date: reqEnd,
+      p_reason: reqReason || null,
+    });
+
+    setReqSubmitting(false);
+
+    if (error) {
+      console.error(error);
+      alert(`등록 실패: ${error.message}`);
+      return;
+    }
+
+    setReqOpen(false);
+    await refreshAll();
+  }
+
   async function submitRequest() {
-    // ✅ 관리자 신청 금지(프론트 차단)
     if (isAdmin) {
-      alert('관리자 계정은 휴가 신청이 불가합니다.');
+      await submitAdminRequest();
       return;
     }
 
@@ -484,7 +561,7 @@ export default function Page() {
           <div style={{ fontSize: 16, fontWeight: 900, opacity: 0.85 }}>{me.display_name}님</div>
         ) : null}
         <div style={{ fontSize: 14, color: '#6b7280' }}>
-          {isAdmin ? '이벤트 클릭 → 상세(관리자: 취소 가능)' : '빈 날짜 클릭 → 신청 / 이벤트 클릭 → 상세'}
+          {isAdmin ? '날짜 클릭: 대상자 선택 후 휴가 등록 / 이벤트 클릭: 상세(취소 가능)' : '빈 날짜 클릭 → 신청 / 이벤트 클릭 → 상세'}
         </div>
       </div>
 
@@ -503,7 +580,6 @@ export default function Page() {
           events={events}
           // ✅ 관리자일 때는 dateClick 자체를 무시 (신청 완전 차단)
           dateClick={(arg) => {
-            if (isAdmin) return;
             openRequestModal(arg.dateStr);
           }}
           eventClick={(info) => {
@@ -790,7 +866,7 @@ export default function Page() {
       </div>
 
       {/* ===== 신청 모달 (관리자: 아예 안 뜨게) ===== */}
-      {!isAdmin && reqOpen && (
+      {reqOpen && (
         <div
           style={{
             position: 'fixed',
@@ -838,6 +914,32 @@ export default function Page() {
             </div>
 
             <div style={{ marginTop: 14, display: 'grid', gap: 10 }}>
+              {isAdmin && (
+                <div>
+                <div style={{ fontSize: 15, fontWeight: 900, marginBottom: 6 }}>대상자</div>
+                  <select
+                    value={reqUserId}
+                    onChange={(e) => setReqUserId(e.target.value)}
+                    style={{
+                      width: '100%',
+                      height: 46,
+                      borderRadius: 12,
+                      border: '1px solid #e5e7eb',
+                      padding: '0 12px',
+                      fontSize: 16,
+                      fontWeight: 800,
+                      background: '#fff',
+                    }}
+                  >
+                    {adminUsers.map((u) => (
+                      <option key={u.user_id} value={u.user_id}>
+                        {u.display_name || u.user_id}
+                        {u.role === 'admin' ? ' (관리자)' : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
               <div>
                 <div style={{ fontSize: 15, fontWeight: 900, marginBottom: 6 }}>유형</div>
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
