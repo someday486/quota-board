@@ -535,14 +535,64 @@ export default function Page() {
     await refreshAll();
   }
 
-  // admin weekly pdf download (현재 비활성화 예정)
+  // admin weekly pdf download (??? ?????? ???)
   function downloadWeeklyPdf() {
     if (!weekKey) {
-      alert('주차를 선택하세요.');
+      alert('?????????????');
       return;
     }
     window.open(`/api/hr/weekly-pdf?week=${encodeURIComponent(weekKey)}`, '_blank');
   }
+
+  async function getAccessToken() {
+    const { data } = await supabase.auth.getSession();
+    let token = data.session?.access_token;
+
+    if (!token) {
+      const refreshed = await supabase.auth.refreshSession();
+      token = refreshed.data.session?.access_token ?? undefined;
+    }
+
+    return token ?? null;
+  }
+
+  async function downloadWeeklyCsv() {
+    if (!weekKey) {
+      alert('?????????????');
+      return;
+    }
+
+    const token = await getAccessToken();
+    if (!token) {
+      alert('?????? ???????? (???????????)');
+      return;
+    }
+
+    const res = await fetch(`/api/hr/weekly-csv?week=${encodeURIComponent(weekKey)}`, {
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    // ??????: Unauthorized??????? ?????/????? ???????? ??? ???
+    if (!res.ok) {
+      const txt = await res.text().catch(() => '');
+      alert(`?????? ??? (${res.status})
+${txt}`);
+      return;
+    }
+
+    const blob = await res.blob();
+    const url = window.URL.createObjectURL(blob);
+
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `weekly_leave_${weekKey}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+
+    window.URL.revokeObjectURL(url);
+  }
+
 
   // ---------- styles ----------
   const card = {
@@ -796,9 +846,7 @@ export default function Page() {
 
                 {/* ✅ PDF 버튼 비활성화 */}
                 <button
-                  onClick={downloadWeeklyPdf}
-                  disabled
-                  title="PDF 글씨 깨짐 문제 해결 후 활성화됩니다."
+                  onClick={downloadWeeklyCsv}
                   style={{
                     height: 44,
                     borderRadius: 12,
@@ -807,10 +855,9 @@ export default function Page() {
                     background: '#f3f4f6',
                     color: '#9ca3af',
                     fontWeight: 900,
-                    cursor: 'not-allowed',
                   }}
                 >
-                  주간 신청서 PDF 다운로드(준비중)
+                  주간 신청 명단 CSV 다운로드
                 </button>
               </div>
             </header>
