@@ -102,6 +102,48 @@ export default function ApplyList({
   busyDelete,
   formatDateTime,
 }: ApplyListProps) {
+  const handleDownloadExcel = async () => {
+    if (filteredApplies.length === 0) return;
+
+    const rows: string[][] = [
+      ['신청시각', '지역', '팀장', '기업명', '제외여부'],
+      ...filteredApplies.map((a) => [
+        formatDateTime(a.created_at),
+        regionsMap.get(a.region_id)?.region_name ?? a.region_id,
+        a.leader_name ?? '',
+        a.company_name ?? '',
+        a.is_excluded ? '제외' : '정상',
+      ]),
+    ];
+
+    try {
+      const XLSX = await import('xlsx');
+      const wb = XLSX.utils.book_new();
+      const ws = XLSX.utils.aoa_to_sheet(rows);
+
+      ws['!cols'] = [{ wch: 22 }, { wch: 12 }, { wch: 14 }, { wch: 28 }, { wch: 12 }];
+
+      XLSX.utils.book_append_sheet(wb, ws, '팀장지원목록');
+      const out = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+
+      const blob = new Blob([out], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const ymd = new Date().toISOString().slice(0, 10);
+      a.href = url;
+      a.download = `팀장지원목록_${ymd}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (e) {
+      console.error(e);
+      alert('엑셀 파일 생성에 실패했습니다. 잠시 후 다시 시도해주세요.');
+    }
+  };
+
   return (
     <div
       style={{
@@ -168,6 +210,15 @@ export default function ApplyList({
             disabled={!applyQuery && !applyRegionFilter}
           >
             초기화
+          </button>
+
+          <button
+            onClick={handleDownloadExcel}
+            style={{ ...rowBtn, height: 34, padding: '0 10px', opacity: filteredApplies.length > 0 ? 1 : 0.6 }}
+            disabled={filteredApplies.length === 0}
+            title="현재 필터된 팀장 지원 목록을 엑셀(.xlsx)로 다운로드"
+          >
+            팀장 지원 목록 다운로드
           </button>
         </div>
       </div>
