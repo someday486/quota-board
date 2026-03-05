@@ -133,6 +133,13 @@ export default function LeaderPage() {
     } catch {}
   }, []);
 
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      window.location.reload();
+    }, 60 * 60 * 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
   const toggleGuide = () => {
     setGuideOpen((prev) => {
       const next = !prev;
