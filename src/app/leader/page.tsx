@@ -70,6 +70,18 @@ function getLocalDayRangeISO() {
 
 type ToastType = 'success' | 'info';
 type ToastState = { type: ToastType; text: string } | null;
+type SupportLogPayload = {
+  event_type: 'APPLY' | 'RESERVE_APPLY' | 'DELETE' | 'EXCEPTION_ON' | 'EXCEPTION_OFF';
+  applied_at?: string | null;
+  application_id?: string | null;
+  leader_name?: string | null;
+  region_id?: string | null;
+  region_name?: string | null;
+  company_name?: string | null;
+  is_reserve?: boolean | null;
+  is_excluded?: boolean | null;
+  note?: string | null;
+};
 
 export default function LeaderPage() {
   const router = useRouter();
@@ -138,6 +150,34 @@ export default function LeaderPage() {
   };
 
   const clearError = () => setErrorMsg('');
+
+  const getAccessToken = async () => {
+    const { data } = await supabase.auth.getSession();
+    let token = data.session?.access_token;
+    if (!token) {
+      const refreshed = await supabase.auth.refreshSession();
+      token = refreshed.data.session?.access_token ?? undefined;
+    }
+    return token ?? null;
+  };
+
+  const appendSupportLog = async (payload: SupportLogPayload) => {
+    try {
+      const token = await getAccessToken();
+      if (!token) return;
+
+      await fetch('/api/support-log', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(payload),
+      });
+    } catch (e) {
+      console.warn('[support-log] append failed:', e);
+    }
+  };
 
   const loadRegions = async () => {
     const { data, error } = await supabase
@@ -397,6 +437,36 @@ export default function LeaderPage() {
       showToast('success', '지원 완료');
       setCompanyByRegionId((prev) => ({ ...prev, [regionId]: '' }));
 
+      let newApplicationId: string | null = null;
+      let newAppliedAt: string | null = null;
+      if (myUserId) {
+        const { data: latest } = await supabase
+          .from('applications_live')
+          .select('id, created_at')
+          .eq('user_id', myUserId)
+          .eq('region_id', regionId)
+          .eq('company_name', c)
+          .eq('is_reserve', false)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        newApplicationId = (latest as { id: string } | null)?.id ?? null;
+        newAppliedAt = (latest as { created_at?: string | null } | null)?.created_at ?? null;
+      }
+
+      await appendSupportLog({
+        event_type: 'APPLY',
+        applied_at: newAppliedAt,
+        application_id: newApplicationId,
+        leader_name: leaderName,
+        region_id: regionId,
+        region_name: regionsMap.get(regionId)?.region_name ?? regionId,
+        company_name: c,
+        is_reserve: false,
+        is_excluded: false,
+        note: 'team_apply',
+      });
+
       await loadStatus();
       const { data: u } = await supabase.auth.getUser();
       if (u?.user) {
@@ -471,19 +541,36 @@ export default function LeaderPage() {
 
     setBusyReserve(true);
     try {
-      const { error } = await supabase.from('applications_live').insert({
-        user_id: myUserId,
-        leader_name: leaderName,
-        region_id: rid,
-        company_name: c,
-        is_reserve: true,
-        is_excluded: false,
-      } as any);
+      const { data: inserted, error } = await supabase
+        .from('applications_live')
+        .insert({
+          user_id: myUserId,
+          leader_name: leaderName,
+          region_id: rid,
+          company_name: c,
+          is_reserve: true,
+          is_excluded: false,
+        } as any)
+        .select('id, created_at')
+        .maybeSingle();
 
       if (error) {
         setErrorMsg(error.message);
         return;
       }
+
+      await appendSupportLog({
+        event_type: 'RESERVE_APPLY',
+        applied_at: (inserted as { created_at?: string | null } | null)?.created_at ?? null,
+        application_id: (inserted as { id: string } | null)?.id ?? null,
+        leader_name: leaderName,
+        region_id: rid,
+        region_name: regionsMap.get(rid)?.region_name ?? rid,
+        company_name: c,
+        is_reserve: true,
+        is_excluded: false,
+        note: 'team_reserve_apply',
+      });
 
       showToast('success', '예비 등록 완료');
       setReserveOpen(false);

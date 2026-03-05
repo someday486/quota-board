@@ -41,6 +41,7 @@ type CallRecordingRow = {
 
 type ApplyListProps = {
   filteredApplies: LiveApplyRow[];
+  hasAnyApplies: boolean;
   regionsMap: Map<string, RegionRow>;
   applyRegionFilter: string;
   setApplyRegionFilter: (value: string) => void;
@@ -68,11 +69,14 @@ type ApplyListProps = {
   toggleExcludeApply: (row: LiveApplyRow) => void;
   deleteApply: (row: LiveApplyRow) => void;
   busyDelete: string | null;
+  onSyncToSheet: () => void;
+  busySyncToSheet: boolean;
   formatDateTime: (value?: string | null) => string;
 };
 
 export default function ApplyList({
   filteredApplies,
+  hasAnyApplies,
   regionsMap,
   applyRegionFilter,
   setApplyRegionFilter,
@@ -100,6 +104,8 @@ export default function ApplyList({
   toggleExcludeApply,
   deleteApply,
   busyDelete,
+  onSyncToSheet,
+  busySyncToSheet,
   formatDateTime,
 }: ApplyListProps) {
   const handleDownloadExcel = async () => {
@@ -219,6 +225,19 @@ export default function ApplyList({
             title="현재 필터된 팀장 지원 목록을 엑셀(.xlsx)로 다운로드"
           >
             팀장 지원 목록 다운로드
+          </button>
+          <button
+            onClick={onSyncToSheet}
+            style={{
+              ...rowBtn,
+              height: 34,
+              padding: '0 10px',
+              opacity: hasAnyApplies && !busySyncToSheet ? 1 : 0.6,
+            }}
+            disabled={!hasAnyApplies || busySyncToSheet}
+            title="현재 전체 팀장지원목록을 시트에 반영(기존 데이터 대체)"
+          >
+            {busySyncToSheet ? '동기화중...' : '시트 동기화'}
           </button>
         </div>
       </div>

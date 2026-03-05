@@ -50,6 +50,30 @@ type LiveApplyRow = {
   is_reserve: boolean;
 };
 
+type SupportLogPayload = {
+  event_type: 'APPLY' | 'RESERVE_APPLY' | 'DELETE' | 'EXCEPTION_ON' | 'EXCEPTION_OFF';
+  applied_at?: string | null;
+  application_id?: string | null;
+  leader_name?: string | null;
+  region_id?: string | null;
+  region_name?: string | null;
+  company_name?: string | null;
+  is_reserve?: boolean | null;
+  is_excluded?: boolean | null;
+  note?: string | null;
+};
+
+type SupportSyncRow = {
+  applied_at: string;
+  application_id: string;
+  leader_name: string;
+  region_id: string;
+  region_name: string;
+  company_name: string;
+  is_reserve: boolean;
+  is_excluded: boolean;
+};
+
 type RegionRow = {
   id: string;
   region_name: string;
@@ -157,6 +181,34 @@ export default function AdminPage() {
     router.replace('/login');
   };
 
+  const getAccessToken = async () => {
+    const { data } = await supabase.auth.getSession();
+    let token = data.session?.access_token;
+    if (!token) {
+      const refreshed = await supabase.auth.refreshSession();
+      token = refreshed.data.session?.access_token ?? undefined;
+    }
+    return token ?? null;
+  };
+
+  const appendSupportLog = async (payload: SupportLogPayload) => {
+    try {
+      const token = await getAccessToken();
+      if (!token) return;
+
+      await fetch('/api/support-log', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(payload),
+      });
+    } catch (e) {
+      console.warn('[support-log] append failed:', e);
+    }
+  };
+
 
   // 1인당 하루 지원 한도(공통)
   const [applyLimit, setApplyLimit] = useState<number>(0); // 0 = 무제한
@@ -203,6 +255,7 @@ export default function AdminPage() {
   // 예비 등록 목록(별도 표시)
   const [reserveApplies, setReserveApplies] = useState<LiveApplyRow[]>([]);
   const [busyDelete, setBusyDelete] = useState<string | null>(null);
+  const [busySyncSheet, setBusySyncSheet] = useState(false);
 
   const loadRegions = async () => {
     const { data, error } = await supabase
@@ -567,9 +620,22 @@ const handleToggleReviewed = async (applicationId: string, checked: boolean) => 
 
       // ✅ 지원 row 삭제
       const { error } = await supabase.from('applications_live').delete().eq('id', row.id);
-      if (error) throw new Error(`삭제 실패: ${error.message}`);
+      if (error) throw new Error(`delete failed: ${error.message}`);
 
-      pushToast('success', '삭제 완료');
+      await appendSupportLog({
+        event_type: 'DELETE',
+        applied_at: row.created_at,
+        application_id: row.id,
+        leader_name: row.leader_name,
+        region_id: row.region_id,
+        region_name: rn,
+        company_name: row.company_name,
+        is_reserve: row.is_reserve,
+        is_excluded: row.is_excluded,
+        note: 'admin_delete',
+      });
+
+      pushToast('success', '?? ??');
       await loadApplies();
       await loadStatus();
       await loadTodayCounts();
@@ -607,13 +673,26 @@ const handleToggleReviewed = async (applicationId: string, checked: boolean) => 
 
     const { error } = await supabase.from('applications_live').update({ is_excluded: next }).eq('id', row.id);
     if (error) {
-      // 롤백
+      // ??
       setApplies((prev) => prev.map((x) => (x.id === row.id ? ({ ...x, is_excluded: row.is_excluded } as LiveApplyRow) : x)));
-      setErrorMsg(`제외 처리 실패: ${error.message}`);
+      setErrorMsg(`?? ?? ??: ${error.message}`);
       return;
     }
 
-    pushToast('success', next ? '제외 처리 완료' : '제외 해제 완료');
+    await appendSupportLog({
+      event_type: next ? 'EXCEPTION_ON' : 'EXCEPTION_OFF',
+      applied_at: row.created_at,
+      application_id: row.id,
+      leader_name: row.leader_name,
+      region_id: row.region_id,
+      region_name: rn,
+      company_name: row.company_name,
+      is_reserve: row.is_reserve,
+      is_excluded: next,
+      note: next ? 'admin_exception_on' : 'admin_exception_off',
+    });
+
+    pushToast('success', next ? '?? ?? ??' : '?? ?? ??');
     if (next) {
       let promoted = false;
       const { data: reservePick, error: reservePickErr } = await supabase
@@ -709,6 +788,62 @@ const handleToggleReviewed = async (applicationId: string, checked: boolean) => 
     setBusyUpdateCompanyId(null);
 
     await loadApplies(); // 화면 즉시 반영
+  };
+
+  const syncSupportListToSheet = async () => {
+    pushToast('info', '');
+    if (busySyncSheet) return;
+
+    if (applies.length === 0) {
+      pushToast('info', '동기화할 목록이 없습니다.');
+      return;
+    }
+
+    const token = await getAccessToken();
+    if (!token) {
+      setErrorMsg('인증 토큰을 확인할 수 없습니다. 다시 로그인해 주세요.');
+      return;
+    }
+
+    const rows: SupportSyncRow[] = applies.map((a) => ({
+      applied_at: a.created_at,
+      application_id: a.id,
+      leader_name: a.leader_name ?? '',
+      region_id: a.region_id ?? '',
+      region_name: regionsMap.get(a.region_id)?.region_name ?? a.region_id,
+      company_name: a.company_name ?? '',
+      is_reserve: Boolean(a.is_reserve),
+      is_excluded: Boolean(a.is_excluded),
+    }));
+
+    setBusySyncSheet(true);
+    try {
+      const res = await fetch('/api/support-log/sync', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ rows }),
+      });
+
+      const json = (await res.json().catch(() => null)) as
+        | { appended?: number; skipped?: number; error?: string }
+        | null;
+
+      if (!res.ok) {
+        throw new Error(json?.error || '시트 동기화에 실패했습니다.');
+      }
+
+      const appended = Number(json?.appended ?? 0);
+      const skipped = Number(json?.skipped ?? 0);
+      pushToast('success', `시트 동기화 완료 (추가 ${appended}건, 중복 제외 ${skipped}건)`);
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : '시트 동기화 중 오류가 발생했습니다.';
+      setErrorMsg(message);
+    } finally {
+      setBusySyncSheet(false);
+    }
   };
 
   const loadApplyLimit = async () => {
@@ -1790,6 +1925,7 @@ const copyBoardAsImage = async () => {
 
       <ApplyList
         filteredApplies={filteredApplies}
+        hasAnyApplies={applies.length > 0}
         regionsMap={regionsMap}
         applyRegionFilter={applyRegionFilter}
         setApplyRegionFilter={setApplyRegionFilter}
@@ -1820,6 +1956,8 @@ const copyBoardAsImage = async () => {
         toggleExcludeApply={toggleExcludeApply}
         deleteApply={deleteApply}
         busyDelete={busyDelete}
+        onSyncToSheet={syncSupportListToSheet}
+        busySyncToSheet={busySyncSheet}
         formatDateTime={fmtDT}
       />
 

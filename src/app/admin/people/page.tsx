@@ -46,7 +46,7 @@ function isCurrentlyRestricted(untilIso: string | null) {
   return end > Date.now();
 }
 
-function suggestedPenaltyLabel(count: number) {
+function penaltyRuleLabel(count: number) {
   if (count >= 5) return '규정: 1개월 제한 대상';
   if (count >= 3) return '규정: 1주 제한 대상';
   return '제한 없음';
@@ -214,21 +214,6 @@ export default function AdminPeoplePage() {
     setErrorMsg('');
   };
 
-  const setQuickRestriction = (userId: string, days: number) => {
-    const base = new Date();
-    base.setDate(base.getDate() + days);
-    base.setHours(23, 59, 0, 0);
-    const value = `${base.getFullYear()}-${pad(base.getMonth() + 1)}-${pad(base.getDate())}T${pad(base.getHours())}:${pad(base.getMinutes())}`;
-
-    setEdits((prev) => ({
-      ...prev,
-      [userId]: {
-        ...(prev[userId] ?? { invalidCallCount: '0', restrictedUntil: '', note: '' }),
-        restrictedUntil: value,
-      },
-    }));
-  };
-
   useEffect(() => {
     (async () => {
       const { data: auth, error } = await supabase.auth.getUser();
@@ -337,11 +322,7 @@ export default function AdminPeoplePage() {
             </div>
           </div>
 
-          {errorMsg && (
-            <div style={errorBox}>
-              {errorMsg}
-            </div>
-          )}
+          {errorMsg && <div style={errorBox}>{errorMsg}</div>}
 
           <div style={{ marginTop: 12, overflowX: 'auto' }}>
             <table style={{ width: '100%', minWidth: 1160, borderCollapse: 'collapse' }}>
@@ -392,7 +373,7 @@ export default function AdminPeoplePage() {
                         />
                       </td>
                       <td style={tdCell}>
-                        <b>{suggestedPenaltyLabel(Number.isFinite(count) ? count : 0)}</b>
+                        <b>{penaltyRuleLabel(Number.isFinite(count) ? count : 0)}</b>
                       </td>
                       <td style={tdCell}>
                         <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -407,12 +388,6 @@ export default function AdminPeoplePage() {
                             }
                             style={{ ...miniInput, width: 176 }}
                           />
-                          <button type="button" style={miniBtn} onClick={() => setQuickRestriction(r.user_id, 7)}>
-                            +1주
-                          </button>
-                          <button type="button" style={miniBtn} onClick={() => setQuickRestriction(r.user_id, 30)}>
-                            +1개월
-                          </button>
                           <button
                             type="button"
                             style={miniBtn}
