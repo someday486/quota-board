@@ -1366,6 +1366,9 @@ const copyBoardAsImage = async () => {
         <AdminHeader
           adminName={adminName}
           todayLabel={todayLabel}
+          activePage="dashboard"
+          onGoDashboard={() => router.push('/admin')}
+          onGoPeople={() => router.push('/admin/people')}
           onGoHr={() => router.push('/hr/calendar')}
           onLogout={doLogout}
         />

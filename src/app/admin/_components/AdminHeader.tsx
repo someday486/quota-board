@@ -7,9 +7,25 @@ type AdminHeaderProps = {
   todayLabel: string;
   onGoHr: () => void;
   onLogout: () => void;
+  onGoDashboard?: () => void;
+  onGoPeople?: () => void;
+  activePage?: 'dashboard' | 'people';
 };
 
-export default function AdminHeader({ adminName, todayLabel, onGoHr, onLogout }: AdminHeaderProps) {
+export default function AdminHeader({
+  adminName,
+  todayLabel,
+  onGoHr,
+  onLogout,
+  onGoDashboard,
+  onGoPeople,
+  activePage = 'dashboard',
+}: AdminHeaderProps) {
+  const tabBtn = (active: boolean) => ({
+    ...ghostBtn,
+    ...(active ? { background: '#111', color: '#fff', borderColor: '#111' } : {}),
+  });
+
   return (
     <div
       style={{
@@ -31,9 +47,18 @@ export default function AdminHeader({ adminName, todayLabel, onGoHr, onLogout }:
         </div>
       </div>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
         <div style={{ fontSize: 12, color: '#6b7280' }}>{todayLabel}</div>
-        {/* 휴가 신청(캘린더 페이지 이동 버튼) */}
+        {onGoDashboard && (
+          <button onClick={onGoDashboard} style={tabBtn(activePage === 'dashboard')}>
+            대시보드
+          </button>
+        )}
+        {onGoPeople && (
+          <button onClick={onGoPeople} style={tabBtn(activePage === 'people')}>
+            인원 관리
+          </button>
+        )}
         <button onClick={onGoHr} style={ghostBtn}>
           휴가 신청
         </button>

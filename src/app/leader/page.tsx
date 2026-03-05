@@ -35,6 +35,9 @@ type ProfileRow = {
   role?: string | null;
   is_admin?: boolean | null;
   leader_group?: number | null;
+  invalid_call_count?: number | null;
+  participation_restricted_until?: string | null;
+  participation_restriction_note?: string | null;
 };
 
 type AppSettingRow = {
@@ -103,6 +106,8 @@ export default function LeaderPage() {
   // 오늘 지원 가능 조(0=전체,1=1조,2=2조) + 내 소속 조
   const [activeGroup, setActiveGroup] = useState<number>(0);
   const [myGroup, setMyGroup] = useState<number | null>(null);
+  const [invalidCallCount, setInvalidCallCount] = useState<number>(0);
+  const [restrictedUntil, setRestrictedUntil] = useState<string | null>(null);
 
   // 가이드(사용 방법) 접기/펼치기: 기본=펼침, 사용자 선택 저장
   const GUIDE_KEY = "qb_leader_guide_open";
@@ -267,6 +272,29 @@ export default function LeaderPage() {
     setMyTodayCount(Number(count ?? 0));
   };
 
+  const loadMyProfile = async (uid: string) => {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('display_name, leader_group, invalid_call_count, participation_restricted_until')
+      .eq('user_id', uid)
+      .maybeSingle();
+
+    if (error) {
+      setErrorMsg(error.message);
+      return;
+    }
+    if (!data) return;
+
+    const row = data as Pick<
+      ProfileRow,
+      'display_name' | 'leader_group' | 'invalid_call_count' | 'participation_restricted_until'
+    >;
+    setLeaderName(row.display_name ?? '팀장');
+    setMyGroup(row.leader_group ?? null);
+    setInvalidCallCount(Number(row.invalid_call_count ?? 0));
+    setRestrictedUntil(row.participation_restricted_until ?? null);
+  };
+
   const totalMyApplies = useMemo(() => myApplies.length, [myApplies]);
 
   const isExempt = useMemo(() => {
@@ -305,7 +333,20 @@ export default function LeaderPage() {
   }, [activeGroup, myGroup]);
 
   // 상태 요약 카드 톤(정상/제한) — 외곽은 아주 연한 경고, 내부 카드는 흰 배경 + 경고 테두리로 조화
-  const isAlert = groupBlocked || limitBlocked;
+  const restrictionBlocked = useMemo(() => {
+    if (!restrictedUntil) return false;
+    const end = new Date(restrictedUntil).getTime();
+    if (Number.isNaN(end)) return false;
+    return end > Date.now();
+  }, [restrictedUntil]);
+
+  const restrictionMessage = useMemo(() => {
+    if (!restrictionBlocked || !restrictedUntil) return '';
+    const label = new Date(restrictedUntil).toLocaleString('ko-KR');
+    return `참여 제한 중입니다. 제한 종료: ${label}`;
+  }, [restrictionBlocked, restrictedUntil]);
+
+  const isAlert = groupBlocked || limitBlocked || restrictionBlocked;
   const wrapBg = isAlert ? '#fff7f7' : '#ffffff';
   const wrapBorder = isAlert ? '#fecaca' : '#e5e7eb';
   const innerBg = isAlert ? '#ffffff' : '#f8fafc';
@@ -314,6 +355,11 @@ export default function LeaderPage() {
   const apply = async (regionId: string) => {
     clearError();
     if (busyRegionId) return;
+
+    if (restrictionBlocked) {
+      setErrorMsg(restrictionMessage || '참여 제한 중입니다.');
+      return;
+    }
 
     const blocked = !isExempt && perPersonLimit > 0 && myTodayCount >= perPersonLimit;
     if (blocked) {
@@ -386,6 +432,11 @@ export default function LeaderPage() {
   const submitReserve = async () => {
     clearError();
     if (busyReserve) return;
+
+    if (restrictionBlocked) {
+      setErrorMsg(restrictionMessage || '참여 제한 중입니다.');
+      return;
+    }
 
     if (limitBlocked) {
       setErrorMsg('오늘 지원 가능 횟수가 0명입니다. (공통 1인당 하루 한도 도달)');
@@ -469,7 +520,7 @@ export default function LeaderPage() {
 
       const { data: prof, error: profErr } = await supabase
         .from('profiles')
-        .select('user_id, display_name, role, is_admin, leader_group')
+        .select('user_id, display_name, role, is_admin, leader_group, invalid_call_count, participation_restricted_until')
         .eq('user_id', uid)
         .maybeSingle();
 
@@ -495,9 +546,11 @@ export default function LeaderPage() {
 
       setLeaderName(p.display_name ?? '팀장');
       setMyGroup(p.leader_group ?? null);
+      setInvalidCallCount(Number(p.invalid_call_count ?? 0));
+      setRestrictedUntil(p.participation_restricted_until ?? null);
 
       await loadRegions();
-      await Promise.all([loadLimit(), loadExempt(), loadActiveGroup(), loadStatus(), loadMyApplies(uid), loadMyTodayCount(uid)]);
+      await Promise.all([loadLimit(), loadExempt(), loadActiveGroup(), loadStatus(), loadMyApplies(uid), loadMyTodayCount(uid), loadMyProfile(uid)]);
 
       if (!alive) return;
 
@@ -526,6 +579,14 @@ export default function LeaderPage() {
             loadStatus();
           })
 
+          .on(
+            'postgres_changes',
+            { event: '*', schema: 'public', table: 'profiles', filter: `user_id=eq.${uidRef}` },
+            () => {
+              loadMyProfile(uidRef!);
+            },
+          )
+
           // ✅ app_settings 구독은 "한 번만" 둡니다 (아래 중복 구독은 삭제할 예정)
           .on('postgres_changes', { event: '*', schema: 'public', table: 'app_settings' }, (payload) => {
             const nk = (payload?.new as any)?.key;
@@ -551,6 +612,7 @@ export default function LeaderPage() {
                 loadStatus();
                 loadMyApplies(uidRef!);
                 loadMyTodayCount(uidRef!);
+                loadMyProfile(uidRef!);
 
                 resubscribe();
               }, 1000);
@@ -572,6 +634,7 @@ export default function LeaderPage() {
           if (uidRef) {
             loadMyApplies(uidRef);
             loadMyTodayCount(uidRef);
+            loadMyProfile(uidRef);
           }
         }
       };
@@ -587,6 +650,7 @@ export default function LeaderPage() {
         if (uidRef) {
           loadMyApplies(uidRef);
           loadMyTodayCount(uidRef);
+          loadMyProfile(uidRef);
         }
       }, 30000);
 
@@ -750,14 +814,14 @@ export default function LeaderPage() {
             <div>
               <div style={{ fontSize: 13, color: '#64748b', fontWeight: 950 }}>오늘 상태 요약</div>
               <div style={{ marginTop: 6, fontSize: 20, fontWeight: 950, letterSpacing: -0.2 }}>
-                {groupBlocked || limitBlocked ? '현재 지원이 제한되어 있습니다.' : '현재 지원 가능합니다.'}
+                {groupBlocked || limitBlocked || restrictionBlocked ? '현재 지원이 제한되어 있습니다.' : '현재 지원 가능합니다.'}
               </div>
             </div>
 
-            {groupBlocked || limitBlocked ? <div style={badgeDanger}>지원 제한</div> : <div style={badgeInfo}>정상</div>}
+            {groupBlocked || limitBlocked || restrictionBlocked ? <div style={badgeDanger}>지원 제한</div> : <div style={badgeInfo}>정상</div>}
           </div>
 
-          <div style={{ marginTop: 12, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <div style={{ marginTop: 12, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 12 }}>
             {/* 오늘 지원 가능 조 (1줄 압축) */}
             <div style={{ ...subCard, background: innerBg, borderColor: innerBorder }}>
               <div style={{ fontSize: 13, color: '#64748b', fontWeight: 950 }}>오늘 지원 가능 조</div>
@@ -803,6 +867,29 @@ export default function LeaderPage() {
                 )}
               </div>
             </div>
+
+            <div style={{ ...subCard, background: innerBg, borderColor: innerBorder }}>
+              <div style={{ fontSize: 13, color: '#64748b', fontWeight: 950 }}>패널티 상태</div>
+              <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                <div style={{ fontSize: 18, fontWeight: 950, letterSpacing: -0.2 }}>
+                  무효콜 누적 <b>{invalidCallCount}</b>회
+                </div>
+                {restrictionBlocked ? (
+                  <span style={pillDangerInline}>참여 제한 중</span>
+                ) : (
+                  <span style={pillInfoInline}>정상</span>
+                )}
+              </div>
+              <div style={{ marginTop: 6, fontSize: 13, color: restrictionBlocked ? '#b91c1c' : '#475569', fontWeight: 800 }}>
+                {restrictionBlocked
+                  ? restrictionMessage
+                  : invalidCallCount >= 5
+                    ? '기준상 1개월 제한 권장 구간'
+                    : invalidCallCount >= 3
+                      ? '기준상 1주 제한 권장 구간'
+                      : '패널티 권장 기준 미도달'}
+              </div>
+            </div>
           </div>
         </div>
 
@@ -827,7 +914,7 @@ export default function LeaderPage() {
                   fontWeight: 900,
                   cursor: 'pointer',
                 }}
-                disabled={closedRegions.length === 0 || limitBlocked || groupBlocked}
+                disabled={closedRegions.length === 0 || limitBlocked || groupBlocked || restrictionBlocked}
                 title={closedRegions.length === 0 ? '마감된 지역이 없어서 예비 등록이 필요 없습니다.' : '마감된 지역에 예비 등록합니다.'}
               >
                 예비등록
@@ -852,7 +939,7 @@ export default function LeaderPage() {
                 const bg = REGION_COLOR[r.region_name] ?? '#fff';
                 const closed = r.is_closed || r.capacity_remaining <= 0 || r.capacity_total <= 0;
                 const isBusy = busyRegionId === r.region_id;
-                const disabled = closed || isBusy || limitBlocked || groupBlocked;
+                const disabled = closed || isBusy || limitBlocked || groupBlocked || restrictionBlocked;
                 if (r.capacity_total === 0) return null;
 
                 return (
@@ -933,7 +1020,7 @@ export default function LeaderPage() {
                           cursor: disabled ? 'not-allowed' : 'pointer',
                         }}
                       >
-                        {isBusy ? '처리중…' : groupBlocked ? '불가' : limitBlocked ? '한도' : closed ? '마감' : '지원'}
+                        {isBusy ? '처리중…' : restrictionBlocked ? '제한' : groupBlocked ? '불가' : limitBlocked ? '한도' : closed ? '마감' : '지원'}
                       </button>
                     </td>
                   </tr>
@@ -1132,7 +1219,7 @@ export default function LeaderPage() {
                   type="button"
                   onClick={submitReserve}
                   style={{ ...btnPrimary, height: 38, minWidth: 120 }}
-                  disabled={busyReserve || closedRegions.length === 0 || limitBlocked || groupBlocked}
+                  disabled={busyReserve || closedRegions.length === 0 || limitBlocked || groupBlocked || restrictionBlocked}
                 >
                   {busyReserve ? '등록중…' : '예비 등록'}
                 </button>
