@@ -884,10 +884,10 @@ export default function LeaderPage() {
                 {restrictionBlocked
                   ? restrictionMessage
                   : invalidCallCount >= 5
-                    ? '기준상 1개월 제한 권장 구간'
+                    ? '규정상 1개월 제한 대상'
                     : invalidCallCount >= 3
-                      ? '기준상 1주 제한 권장 구간'
-                      : '패널티 권장 기준 미도달'}
+                      ? '규정상 1주 제한 대상'
+                      : '규정상 제한 없음'}
               </div>
             </div>
           </div>

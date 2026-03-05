@@ -47,9 +47,9 @@ function isCurrentlyRestricted(untilIso: string | null) {
 }
 
 function suggestedPenaltyLabel(count: number) {
-  if (count >= 5) return '권장: 1개월 제한';
-  if (count >= 3) return '권장: 1주 제한';
-  return '정상';
+  if (count >= 5) return '규정: 1개월 제한 대상';
+  if (count >= 3) return '규정: 1주 제한 대상';
+  return '제한 없음';
 }
 
 export default function AdminPeoplePage() {
@@ -287,9 +287,9 @@ export default function AdminPeoplePage() {
         <div style={cardBox}>
           <div style={{ fontWeight: 900, fontSize: 16 }}>패널티 운영 기준</div>
           <div style={{ marginTop: 8, color: '#374151', fontSize: 14, lineHeight: 1.6 }}>
-            무효콜 누적 3회 이상: 1주 참여 제한 권장
+            무효콜 누적 3회 이상: 1주 참여 제한
             <br />
-            무효콜 누적 5회 이상: 1개월 참여 제한 권장
+            무효콜 누적 5회 이상: 1개월 참여 제한
             <br />
             제한 종료 시각은 수동 입력값이 최종 적용됩니다.
           </div>
@@ -352,7 +352,7 @@ export default function AdminPeoplePage() {
                   <th style={thCell}>권한</th>
                   <th style={thCell}>조</th>
                   <th style={thCell}>무효콜 누적</th>
-                  <th style={thCell}>권장 제재</th>
+                  <th style={thCell}>규정 제재</th>
                   <th style={thCell}>참여 제한 종료</th>
                   <th style={thCell}>사유</th>
                   <th style={thCell}>현재 상태</th>
