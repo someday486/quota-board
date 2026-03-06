@@ -5,6 +5,7 @@ import dayGridPlugin from '@fullcalendar/daygrid';
 import interactionPlugin from '@fullcalendar/interaction';
 import koLocale from '@fullcalendar/core/locales/ko';
 import { useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 
 type LeaveType = 'annual' | 'half_am' | 'half_pm';
@@ -159,6 +160,7 @@ function weekKeyToKoreanLabelWithRange(key: string) {
 
 // ---------- Page ----------
 export default function Page() {
+  const router = useRouter();
   const [me, setMe] = useState<{ id: string; role: string; display_name: string } | null>(null);
   const isAdmin = me?.role === 'admin';
 
@@ -604,16 +606,37 @@ ${txt}`);
 
   return (
     <div style={{ padding: 16 }}>
-      {/* Top */}
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
-        <h1 style={{ fontSize: 22, fontWeight: 900, margin: 0 }}>휴가 캘린더</h1>
-        {me?.display_name ? (
-          <div style={{ fontSize: 16, fontWeight: 900, opacity: 0.85 }}>{me.display_name}님</div>
-        ) : null}
-        <div style={{ fontSize: 14, color: '#6b7280' }}>
-          {isAdmin ? '날짜 클릭: 대상자 선택 후 휴가 등록 / 이벤트 클릭: 상세(취소 가능)' : '빈 날짜 클릭 → 신청 / 이벤트 클릭 → 상세'}
+      <header
+        style={{
+          ...card,
+          padding: '12px 14px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 12,
+          flexWrap: 'wrap',
+        }}
+      >
+        <div style={{ fontSize: 14, fontWeight: 800, color: '#111827', flex: 1, minWidth: 240 }}>
+          휴가 캘린더 관리자님 날짜 클릭: 대상자 선택 후 휴가 등록 / 이벤트 클릭: 상세(취소 가능)
         </div>
-      </div>
+        <button
+          onClick={() => router.push(isAdmin ? '/admin' : '/leader')}
+          style={{
+            height: 38,
+            padding: '0 14px',
+            borderRadius: 10,
+            border: '1px solid #111827',
+            background: '#ffffff',
+            color: '#111827',
+            fontSize: 14,
+            fontWeight: 900,
+            cursor: 'pointer',
+          }}
+        >
+          돌아가기
+        </button>
+      </header>
 
       {loading && <div style={{ marginTop: 8, color: '#6b7280' }}>불러오는 중…</div>}
 
