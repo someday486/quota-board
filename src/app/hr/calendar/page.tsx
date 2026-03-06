@@ -7,6 +7,7 @@ import koLocale from '@fullcalendar/core/locales/ko';
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
+import { useIsMobile } from '@/hooks/useIsMobile';
 
 type LeaveType = 'annual' | 'half_am' | 'half_pm';
 type LeaveStatus = 'pending' | 'approved' | 'rejected' | 'canceled';
@@ -182,6 +183,7 @@ function weekKeyToKoreanLabelWithRange(key: string) {
 // ---------- Page ----------
 export default function Page() {
   const router = useRouter();
+  const isMobile = useIsMobile();
   const [me, setMe] = useState<{ id: string; role: string; display_name: string } | null>(null);
   const isAdmin = me?.role === 'admin';
 
@@ -617,13 +619,14 @@ ${txt}`);
   } as const;
 
   return (
-    <div style={{ padding: 16 }}>
+    <div style={{ padding: isMobile ? 12 : 16 }}>
       <header
         style={{
           ...card,
           padding: '12px 14px',
           display: 'flex',
-          alignItems: 'center',
+          flexDirection: isMobile ? 'column' : 'row',
+          alignItems: isMobile ? 'stretch' : 'center',
           justifyContent: 'space-between',
           gap: 12,
           flexWrap: 'wrap',
@@ -644,6 +647,7 @@ ${txt}`);
             fontSize: 14,
             fontWeight: 900,
             cursor: 'pointer',
+            width: isMobile ? '100%' : 'auto',
           }}
         >
           돌아가기
@@ -692,7 +696,7 @@ ${txt}`);
       <div style={{ marginTop: 18, display: 'grid', gap: 12 }}>
         {/* ✅ 관리자일 경우 "내 연차 현황" 숨김 */}
         {!isAdmin && (
-          <section style={{ ...card, padding: 16 }}>
+          <section style={{ ...card, padding: isMobile ? 12 : 16 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
               <div>
                 <div style={{ fontSize: 19, fontWeight: 900 }}>내 연차 현황(올해)</div>
@@ -700,7 +704,7 @@ ${txt}`);
               </div>
             </div>
 
-            <div style={{ marginTop: 12, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            <div style={{ marginTop: 12, display: 'flex', gap: 10, flexWrap: 'wrap', flexDirection: isMobile ? 'column' : 'row' }}>
               {[
                 { label: '부여', value: myBalance?.earned_days ?? '-' },
                 { label: '사용', value: myBalance?.used_days ?? '-' },
@@ -708,7 +712,7 @@ ${txt}`);
               ].map((x) => (
                 <div
                   key={x.label}
-                  style={{ flex: 1, minWidth: 150, border: '1px solid #eee', borderRadius: 14, padding: 14 }}
+                  style={{ flex: 1, minWidth: isMobile ? '100%' : 150, border: '1px solid #eee', borderRadius: 14, padding: 14 }}
                 >
                   <div style={{ fontSize: 14, color: '#6b7280' }}>{x.label}</div>
                   <div style={{ fontSize: 24, fontWeight: 900, marginTop: 6 }}>{x.value}</div>
@@ -727,7 +731,7 @@ ${txt}`);
             </header>
 
             <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 15 }}>
+              <table style={{ width: '100%', minWidth: 640, borderCollapse: 'collapse', fontSize: isMobile ? 14 : 15 }}>
                 <thead>
                   <tr style={{ background: '#f8fafc' }}>
                     <th style={{ padding: '14px 16px', textAlign: 'left' }}>기간</th>
@@ -782,7 +786,7 @@ ${txt}`);
             </header>
 
             <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 15 }}>
+              <table style={{ width: '100%', minWidth: 520, borderCollapse: 'collapse', fontSize: isMobile ? 14 : 15 }}>
                 <thead>
                   <tr style={{ background: '#f8fafc' }}>
                     <th style={{ padding: '14px 16px', textAlign: 'left' }}>팀장</th>
@@ -819,10 +823,11 @@ ${txt}`);
           <section style={{ ...card, overflow: 'hidden' }}>
             <header
               style={{
-                padding: '16px 18px',
+                padding: isMobile ? '12px' : '16px 18px',
                 borderBottom: '1px solid #e5e7eb',
                 display: 'flex',
-                alignItems: 'center',
+                flexDirection: isMobile ? 'column' : 'row',
+                alignItems: isMobile ? 'stretch' : 'center',
                 justifyContent: 'space-between',
                 gap: 12,
                 flexWrap: 'wrap',
@@ -835,12 +840,13 @@ ${txt}`);
                 </div>
               </div>
 
-              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', width: isMobile ? '100%' : 'auto' }}>
                 <select
                   value={weekYear}
                   onChange={(e) => setWeekYear(Number(e.target.value))}
                   style={{
                     height: 44,
+                    width: isMobile ? '100%' : 'auto',
                     borderRadius: 12,
                     border: '1px solid #d1d5db',
                     padding: '0 12px',
@@ -862,7 +868,8 @@ ${txt}`);
                   onChange={(e) => setWeekKey(e.target.value)}
                   style={{
                     height: 44,
-                    minWidth: 260,
+                    minWidth: isMobile ? 0 : 260,
+                    width: isMobile ? '100%' : 'auto',
                     borderRadius: 12,
                     border: '1px solid #d1d5db',
                     padding: '0 14px',
@@ -890,6 +897,7 @@ ${txt}`);
                     background: '#f3f4f6',
                     color: '#9ca3af',
                     fontWeight: 900,
+                    width: isMobile ? '100%' : 'auto',
                   }}
                 >
                   주간 신청 명단 CSV 다운로드
@@ -898,7 +906,7 @@ ${txt}`);
             </header>
 
             <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 15 }}>
+              <table style={{ width: '100%', minWidth: 760, borderCollapse: 'collapse', fontSize: isMobile ? 14 : 15 }}>
                 <thead>
                   <tr style={{ background: '#f8fafc' }}>
                     <th style={{ padding: '14px 16px', textAlign: 'left' }}>팀장</th>
@@ -972,7 +980,7 @@ ${txt}`);
             }}
             onClick={(e) => e.stopPropagation()}
           >
-            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexDirection: isMobile ? 'column' : 'row' }}>
               <div>
                 <div style={{ fontSize: 20, fontWeight: 900 }}>휴가 신청</div>
                 <div style={{ marginTop: 6, fontSize: 14, color: '#6b7280' }}>주말 제외(평일만 차감)</div>
@@ -988,6 +996,7 @@ ${txt}`);
                   fontSize: 18,
                   fontWeight: 900,
                   cursor: 'pointer',
+                  alignSelf: isMobile ? 'flex-end' : 'auto',
                 }}
                 aria-label="닫기"
               >
@@ -1024,7 +1033,7 @@ ${txt}`);
               )}
               <div>
                 <div style={{ fontSize: 15, fontWeight: 900, marginBottom: 6 }}>유형</div>
-                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', flexDirection: isMobile ? 'column' : 'row' }}>
                   {(['annual', 'half_am', 'half_pm'] as LeaveType[]).map((t) => (
                     <button
                       key={t}
@@ -1042,6 +1051,7 @@ ${txt}`);
                         fontSize: 16,
                         fontWeight: 900,
                         cursor: 'pointer',
+                        width: isMobile ? '100%' : 'auto',
                       }}
                     >
                       {labelOf(t)}
@@ -1125,7 +1135,7 @@ ${txt}`);
                 />
               </div>
 
-              <div style={{ display: 'flex', gap: 10, marginTop: 6 }}>
+              <div style={{ display: 'flex', gap: 10, marginTop: 6, flexDirection: isMobile ? 'column' : 'row' }}>
                 <button
                   onClick={() => setReqOpen(false)}
                   style={{
@@ -1137,6 +1147,7 @@ ${txt}`);
                     fontSize: 17,
                     fontWeight: 900,
                     cursor: 'pointer',
+                    width: isMobile ? '100%' : 'auto',
                   }}
                   disabled={reqSubmitting}
                 >
@@ -1155,6 +1166,7 @@ ${txt}`);
                     fontWeight: 900,
                     cursor: 'pointer',
                     opacity: reqSubmitting ? 0.65 : 1,
+                    width: isMobile ? '100%' : 'auto',
                   }}
                   disabled={reqSubmitting}
                 >
@@ -1191,7 +1203,7 @@ ${txt}`);
             }}
             onClick={(e) => e.stopPropagation()}
           >
-            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexDirection: isMobile ? 'column' : 'row' }}>
               <div>
                 <div style={{ fontSize: 20, fontWeight: 900 }}>
                   {selected.display_name} · {labelOf(selected.leave_type)}
@@ -1218,6 +1230,7 @@ ${txt}`);
                   fontSize: 18,
                   fontWeight: 900,
                   cursor: 'pointer',
+                  alignSelf: isMobile ? 'flex-end' : 'auto',
                 }}
                 aria-label="닫기"
               >
@@ -1284,7 +1297,7 @@ ${txt}`);
               {selected.start_date} ~ {selected.end_date} (사용 {selected.days_count}일)
             </div>
 
-            <div style={{ marginTop: 14, display: 'flex', gap: 10 }}>
+            <div style={{ marginTop: 14, display: 'flex', gap: 10, flexDirection: isMobile ? 'column' : 'row' }}>
               <button
                 onClick={() => setCancelConfirmOpen(false)}
                 style={{
@@ -1296,6 +1309,7 @@ ${txt}`);
                   fontSize: 16,
                   fontWeight: 900,
                   cursor: 'pointer',
+                  width: isMobile ? '100%' : 'auto',
                 }}
               >
                 아니오
@@ -1312,6 +1326,7 @@ ${txt}`);
                   fontSize: 16,
                   fontWeight: 900,
                   cursor: 'pointer',
+                  width: isMobile ? '100%' : 'auto',
                 }}
               >
                 취소합니다

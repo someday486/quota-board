@@ -11,6 +11,7 @@ import ApplyList from './_components/ApplyList';
 import ReserveList from './_components/ReserveList';
 import QuotaBoard from './_components/QuotaBoard';
 import { useAdminPage } from './_hooks/useAdminPage';
+import { useIsMobile } from '@/hooks/useIsMobile';
 import {
   input,
   miniDangerBtn,
@@ -148,6 +149,7 @@ const fmtDT = (v?: string | null) => {
 };
 export default function AdminPage() {
   const router = useRouter();
+  const isMobile = useIsMobile();
   const boardRef = useRef<HTMLDivElement | null>(null);
   const leftTOCardRef = useRef<HTMLDivElement | null>(null);
   const [leftTOCardHeight, setLeftTOCardHeight] = useState<number | null>(null);
@@ -1509,7 +1511,7 @@ const copyBoardAsImage = async () => {
 
   if (checking) {
     return (
-      <main lang="ko-KR" style={{ padding: 28, background: '#f4f6fb', minHeight: '100vh', color: '#111827' }}>
+      <main lang="ko-KR" style={{ padding: isMobile ? 12 : 28, background: '#f4f6fb', minHeight: '100vh', color: '#111827' }}>
         <h1 style={{ margin: 0 }}>관리자 페이지</h1>
         <p style={{ marginTop: 8, color: '#444' }}>로그인/권한 확인 중...</p>
       </main>
@@ -1517,7 +1519,7 @@ const copyBoardAsImage = async () => {
   }
 
   return (
-    <main lang="ko-KR" style={{ padding: 28, background: '#f4f6fb', minHeight: '100vh', color: '#111827' }}>
+    <main lang="ko-KR" style={{ padding: isMobile ? 12 : 28, background: '#f4f6fb', minHeight: '100vh', color: '#111827' }}>
       <div
         style={{
           maxWidth: 1100,
@@ -1543,6 +1545,7 @@ const copyBoardAsImage = async () => {
       <div
         style={{
           display: 'flex',
+          flexDirection: isMobile ? 'column' : 'row',
           gap: 14,
           alignItems: 'flex-start',
           flexWrap: 'wrap',
@@ -1552,30 +1555,31 @@ const copyBoardAsImage = async () => {
         }}
       >
         {/* 좌측: 지역별 TO 테이블 */}
-        <div ref={leftTOCardRef} style={{ flex: 1, minWidth: 585, background: '#fff', border: '1px solid #e5e7eb', borderRadius: 14, boxShadow: '0 10px 30px rgba(17, 24, 39, 0.06)', overflow: 'hidden' }}>
-          <div style={{ padding: '10px 32px', borderBottom: '1px solid #eef2f7', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, minWidth: 0 }}>
+        <div ref={leftTOCardRef} style={{ flex: 1, width: isMobile ? '100%' : undefined, minWidth: isMobile ? '100%' : 585, background: '#fff', border: '1px solid #e5e7eb', borderRadius: 14, boxShadow: '0 10px 30px rgba(17, 24, 39, 0.06)', overflow: 'hidden' }}>
+          <div style={{ padding: isMobile ? '12px' : '10px 32px', borderBottom: '1px solid #eef2f7', display: 'flex', flexDirection: isMobile ? 'column' : 'row', justifyContent: 'space-between', alignItems: isMobile ? 'stretch' : 'center', gap: 10 }}>
+            <div style={{ display: 'flex', alignItems: isMobile ? 'flex-start' : 'baseline', flexDirection: isMobile ? 'column' : 'row', gap: 10, minWidth: 0 }}>
               <div style={{ fontSize: 15, fontWeight: 900, whiteSpace: 'nowrap' }}>지역별 TO</div>
               <div style={{ fontSize: 12, color: '#6b7280', whiteSpace: 'nowrap' }}>
                 입력 · 저장 · 총 지원 {totalAppliedCount}건
               </div>
             </div>
 
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-              <button onClick={saveAllTotals} style={miniPrimaryBtn} disabled={busySave === '__ALL__'}>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', justifyContent: isMobile ? 'stretch' : 'flex-end', width: isMobile ? '100%' : 'auto' }}>
+              <button onClick={saveAllTotals} style={{ ...miniPrimaryBtn, ...(isMobile ? { width: 'calc(50% - 4px)' } : {}) }} disabled={busySave === '__ALL__'}>
                 {busySave === '__ALL__' ? '저장중...' : '전체 저장'}
               </button>
-              <button onClick={resetAll} style={miniDangerBtn} disabled={busyReset}>
+              <button onClick={resetAll} style={{ ...miniDangerBtn, ...(isMobile ? { width: 'calc(50% - 4px)' } : {}) }} disabled={busyReset}>
                 {busyReset ? '초기화중...' : '초기화'}
               </button>
             </div>
           </div>
-          <div style={{ padding: 14 }}>
+          <div style={{ padding: isMobile ? 12 : 14, overflowX: 'auto' }}>
           <table
             className="border-collapse"
             style={{
               tableLayout: 'fixed',
               width: '100%',
+              minWidth: 540,
               border: 'none',
               borderRadius: 10,
               overflow: 'hidden',
@@ -1657,8 +1661,9 @@ const copyBoardAsImage = async () => {
         {/* 우측: 팀장 대시보드(예외 토글 포함) */}
         <div
           style={{
-            width: 500,
-            height: leftTOCardHeight ?? 557,
+            width: isMobile ? '100%' : 500,
+            minWidth: isMobile ? '100%' : 0,
+            height: isMobile ? 'auto' : (leftTOCardHeight ?? 557),
             border: '1px solid #e5e7eb',
             borderRadius: 14,
             overflow: 'hidden',
@@ -1670,27 +1675,30 @@ const copyBoardAsImage = async () => {
         >
           <div
             style={{
-              padding: '10px 12px',
+              padding: isMobile ? '12px' : '10px 12px',
               background: 'linear-gradient(180deg, #f9fafb 0%, #f3f4f6 100%)',
               borderBottom: '1px solid #eee',
               display: 'flex',
+              flexDirection: isMobile ? 'column' : 'row',
               justifyContent: 'space-between',
-              alignItems: 'center',
+              alignItems: isMobile ? 'stretch' : 'center',
               gap: 10,
             }}
           >
             <div style={{ fontSize: 15, fontWeight: 900 }}>팀장 현황</div>
 
             {/* 우측 컨트롤 영역 */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexDirection: isMobile ? 'column' : 'row', width: isMobile ? '100%' : 'auto' }}>
               {/* 1인당 하루 한도 입력 + 적용 (복구) */}
               <div
                 style={{
                   display: 'flex',
                   alignItems: 'center',
                   gap: 6,
-                  paddingLeft: 10,
-                  borderLeft: '1px solid #e5e7eb',
+                  paddingLeft: isMobile ? 0 : 10,
+                  borderLeft: isMobile ? 'none' : '1px solid #e5e7eb',
+                  width: isMobile ? '100%' : 'auto',
+                  flexWrap: 'wrap',
                 }}
               >
                 <span style={{ fontSize: 12, fontWeight: 800, color: '#64748b' }}>1인당 하루 한도</span>
@@ -1703,7 +1711,7 @@ const copyBoardAsImage = async () => {
                   disabled={busyApplyLimit}
                   title="0 = 무제한"
                   style={{
-                    width: 56,
+                    width: isMobile ? 'calc(100% - 64px)' : 56,
                     height: 28,
                     textAlign: 'center',
                     fontSize: 13,
@@ -1740,8 +1748,10 @@ const copyBoardAsImage = async () => {
                   display: 'flex',
                   alignItems: 'center',
                   gap: 6,
-                  paddingLeft: 10,
-                  borderLeft: '1px solid #e5e7eb',
+                  paddingLeft: isMobile ? 0 : 10,
+                  borderLeft: isMobile ? 'none' : '1px solid #e5e7eb',
+                  width: isMobile ? '100%' : 'auto',
+                  flexWrap: 'wrap',
                 }}
               >
                 <span style={{ fontSize: 12, fontWeight: 800, color: '#64748b' }}>오늘 지원 조</span>
@@ -1772,7 +1782,7 @@ const copyBoardAsImage = async () => {
 
           <div style={{ padding: 12, display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
             {/* 검색 */}
-            <div style={{ marginBottom: 10, display: 'flex', gap: 8, alignItems: 'center' }}>
+            <div style={{ marginBottom: 10, display: 'flex', gap: 8, alignItems: 'center', flexDirection: isMobile ? 'column' : 'row' }}>
               <input
                 value={leaderQuery}
                 onChange={(e) => setLeaderQuery(e.target.value)}
@@ -1786,6 +1796,7 @@ const copyBoardAsImage = async () => {
                   ...input,
                   height: 34,
                   flex: 1,
+                  width: isMobile ? '100%' : undefined,
                   padding: '0 10px',
                 }}
               />
@@ -1796,6 +1807,7 @@ const copyBoardAsImage = async () => {
                   height: 34,
                   padding: '0 10px',
                   opacity: leaderQuery ? 1 : 0.6,
+                  width: isMobile ? '100%' : 'auto',
                 }}
                 disabled={!leaderQuery}
               >
@@ -1806,7 +1818,7 @@ const copyBoardAsImage = async () => {
             <div
               style={{
                 display: 'grid',
-                gridTemplateColumns: '1fr 1fr',
+                gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr',
                 gap: 10,
                 flex: 1,
                 minHeight: 0,
@@ -1830,12 +1842,13 @@ const copyBoardAsImage = async () => {
                     <div
                       style={{
                         display: 'flex',
+                        flexDirection: isMobile ? 'column' : 'row',
                         justifyContent: 'space-between',
-                        alignItems: 'center',
+                        alignItems: isMobile ? 'stretch' : 'center',
                         gap: 10,
                       }}
                     >
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, flexWrap: 'wrap' }}>
                         <div
                           style={{
                             fontWeight: 900,
@@ -1897,7 +1910,7 @@ const copyBoardAsImage = async () => {
                         )}
                       </div>
 
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, justifyContent: isMobile ? 'space-between' : 'flex-start' }}>
 
                         <div
                           style={{

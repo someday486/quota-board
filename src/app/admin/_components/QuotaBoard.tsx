@@ -2,6 +2,7 @@
 
 import type { RefObject } from 'react';
 import { REGION_BOARD_COLOR, rowBtn, tdTiny, thTiny } from '../styles';
+import { useIsMobile } from '@/hooks/useIsMobile';
 
 type BoardCell = {
   leader_name: string;
@@ -30,6 +31,8 @@ export default function QuotaBoard({
   regionsOrdered,
   boardByRegionId,
 }: QuotaBoardProps) {
+  const isMobile = useIsMobile();
+
   return (
     <>
       <div
@@ -37,13 +40,14 @@ export default function QuotaBoard({
           marginTop: 26,
           marginBottom: 10,
           display: 'flex',
-          alignItems: 'center',
+          flexDirection: isMobile ? 'column' : 'row',
+          alignItems: isMobile ? 'stretch' : 'center',
           gap: 10,
         }}
       >
         <h2 style={{ margin: 0 }}>지역별 지원 보드(현재)</h2>
 
-        <button onClick={copyBoardAsImage} style={rowBtn} disabled={busyCopyBoard}>
+        <button onClick={copyBoardAsImage} style={{ ...rowBtn, ...(isMobile ? { width: '100%' } : {}) }} disabled={busyCopyBoard}>
           {busyCopyBoard ? '복사중..' : '보드 이미지 복사'}
         </button>
       </div>

@@ -1,6 +1,7 @@
 'use client';
 
 import { ghostBtn } from '../styles';
+import { useIsMobile } from '@/hooks/useIsMobile';
 
 type AdminHeaderProps = {
   adminName: string;
@@ -21,8 +22,11 @@ export default function AdminHeader({
   onGoPeople,
   activePage = 'dashboard',
 }: AdminHeaderProps) {
+  const isMobile = useIsMobile();
+
   const tabBtn = (active: boolean) => ({
     ...ghostBtn,
+    ...(isMobile ? { width: '100%', justifyContent: 'center' as const } : {}),
     ...(active ? { background: '#111', color: '#fff', borderColor: '#111' } : {}),
   });
 
@@ -35,8 +39,9 @@ export default function AdminHeader({
         padding: '14px 16px',
         boxShadow: '0 10px 30px rgba(17, 24, 39, 0.06)',
         display: 'flex',
+        flexDirection: isMobile ? 'column' : 'row',
         justifyContent: 'space-between',
-        alignItems: 'center',
+        alignItems: isMobile ? 'stretch' : 'center',
         gap: 12,
       }}
     >
@@ -47,8 +52,17 @@ export default function AdminHeader({
         </div>
       </div>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-        <div style={{ fontSize: 12, color: '#6b7280' }}>{todayLabel}</div>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          flexWrap: 'wrap',
+          justifyContent: isMobile ? 'stretch' : 'flex-end',
+          width: isMobile ? '100%' : 'auto',
+        }}
+      >
+        <div style={{ fontSize: 12, color: '#6b7280', width: isMobile ? '100%' : 'auto' }}>{todayLabel}</div>
         {onGoDashboard && (
           <button onClick={onGoDashboard} style={tabBtn(activePage === 'dashboard')}>
             대시보드
@@ -59,10 +73,10 @@ export default function AdminHeader({
             인원 관리
           </button>
         )}
-        <button onClick={onGoHr} style={ghostBtn}>
+        <button onClick={onGoHr} style={{ ...ghostBtn, ...(isMobile ? { width: '100%' } : {}) }}>
           휴가 신청
         </button>
-        <button onClick={onLogout} style={ghostBtn}>
+        <button onClick={onLogout} style={{ ...ghostBtn, ...(isMobile ? { width: '100%' } : {}) }}>
           로그아웃
         </button>
       </div>

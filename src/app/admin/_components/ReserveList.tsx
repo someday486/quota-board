@@ -1,6 +1,7 @@
 'use client';
 
 import { dangerMiniBtn, tdSmall, thSmall } from '../styles';
+import { useIsMobile } from '@/hooks/useIsMobile';
 
 type RegionRow = {
   id: string;
@@ -35,15 +36,17 @@ export default function ReserveList({
   busyDelete,
   formatDateTime,
 }: ReserveListProps) {
+  const isMobile = useIsMobile();
+
   return (
     <div style={{ marginTop: 26 }}>
-      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12, marginBottom: 8 }}>
+      <div style={{ display: 'flex', alignItems: isMobile ? 'flex-start' : 'baseline', flexDirection: isMobile ? 'column' : 'row', justifyContent: 'space-between', gap: 12, marginBottom: 8 }}>
         <h2 style={{ margin: 0 }}>예비 등록 목록</h2>
         <div style={{ fontSize: 12, color: '#64748b' }}>총 {reserveApplies.length}건</div>
       </div>
 
-      <div style={{ border: '1px solid #ddd', borderRadius: 10, overflow: 'hidden', maxWidth: 1100, background: '#fff' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
+      <div style={{ border: '1px solid #ddd', borderRadius: 10, overflowX: 'auto', overflowY: 'hidden', maxWidth: 1100, background: '#fff' }}>
+        <table style={{ width: '100%', minWidth: 760, borderCollapse: 'collapse', fontSize: isMobile ? 13 : 14 }}>
           <thead>
             <tr style={{ background: '#f6f7f9' }}>
               <th style={{ ...thSmall, width: 140 }}>시간</th>

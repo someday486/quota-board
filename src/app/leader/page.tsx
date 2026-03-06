@@ -3,6 +3,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
+import { useIsMobile } from '@/hooks/useIsMobile';
 
 type RegionStatusRow = {
   region_id: string;
@@ -97,6 +98,7 @@ type SupportLogPayload = {
 
 export default function LeaderPage() {
   const router = useRouter();
+  const isMobile = useIsMobile();
 
   const [checking, setChecking] = useState(true);
   const [leaderName, setLeaderName] = useState('팀장');
@@ -783,9 +785,9 @@ export default function LeaderPage() {
 
   if (checking) {
     return (
-      <main lang="ko-KR" style={{ minHeight: '100vh', background: '#f3f4f6', padding: 24 }}>
+      <main lang="ko-KR" style={{ minHeight: '100vh', background: '#f3f4f6', padding: isMobile ? 12 : 24 }}>
         <div style={{ maxWidth: 1100, margin: '0 auto' }}>
-          <div style={headerCard}>
+          <div style={{ ...headerCard, ...(isMobile ? { padding: '16px 14px' } : {}) }}>
             <div>
               <div style={{ fontSize: 18, fontWeight: 900 }}>팀장 대시보드</div>
               <div style={{ marginTop: 4, fontSize: 12, color: '#64748b', fontWeight: 700 }}>
@@ -799,10 +801,10 @@ export default function LeaderPage() {
   }
 
   return (
-    <main lang="ko-KR" style={{ minHeight: '100vh', background: '#f3f4f6', padding: 24 }}>
+    <main lang="ko-KR" style={{ minHeight: '100vh', background: '#f3f4f6', padding: isMobile ? 12 : 24 }}>
       <div style={{ maxWidth: 1100, margin: '0 auto' }}>
         {/* 헤더 */}
-        <div style={headerCard}>
+        <div style={{ ...headerCard, ...(isMobile ? { padding: '16px 14px', alignItems: 'stretch' } : {}) }}>
           <div>
             <div style={{ fontSize: 18, fontWeight: 900 }}>팀장 대시보드</div>
             <div style={{ marginTop: 4, fontSize: 12, color: '#64748b', fontWeight: 700 }}>
@@ -815,11 +817,13 @@ export default function LeaderPage() {
             style={{
               marginTop: 18,
               display: 'flex',
-              justifyContent: 'flex-end',
+              justifyContent: isMobile ? 'stretch' : 'flex-end',
               gap: 10, // ← 여기만 추가
+              flexDirection: isMobile ? 'column' : 'row',
+              width: isMobile ? '100%' : 'auto',
             }}
           >
-            <button onClick={() => router.push('/hr/calendar')} style={btnOutline}>
+            <button onClick={() => router.push('/hr/calendar')} style={{ ...btnOutline, ...(isMobile ? { width: '100%' } : {}) }}>
               휴가신청
             </button>
             <button
@@ -827,7 +831,7 @@ export default function LeaderPage() {
                 await supabase.auth.signOut();
                 router.replace('/login');
               }}
-              style={btnOutline}
+              style={{ ...btnOutline, ...(isMobile ? { width: '100%' } : {}) }}
             >
               로그아웃
             </button>
@@ -864,30 +868,30 @@ export default function LeaderPage() {
         )}
 
         {/* 사용 방법(가이드) 카드: 기본=펼침, 접기 가능 */}
-        <div style={{ ...card, marginTop: 16 }}>
+        <div style={{ ...card, marginTop: 16, ...(isMobile ? { padding: 12 } : {}) }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
             <div>
               <div style={{ fontSize: 13, color: '#64748b', fontWeight: 950 }}>사용 방법</div>
-              <div style={{ marginTop: 6, fontSize: 18, fontWeight: 950, letterSpacing: -0.2 }}>
-                지역 선택 → 기업명 입력 → Enter(또는 지원 버튼)
-              </div>
-              <div style={{ marginTop: 4, fontSize: 14, color: '#475569', fontWeight: 850, lineHeight: 1.6 }}>
-                오늘 지원 가능한 조 / 하루 지원 가능 횟수에 따라 지원이 제한될 수 있습니다.
-              </div>
+                <div style={{ marginTop: 6, fontSize: isMobile ? 16 : 18, fontWeight: 950, letterSpacing: -0.2 }}>
+                  지역 선택 → 기업명 입력 → Enter(또는 지원 버튼)
+                </div>
+                <div style={{ marginTop: 4, fontSize: isMobile ? 13 : 14, color: '#475569', fontWeight: 850, lineHeight: 1.6 }}>
+                  오늘 지원 가능한 조 / 하루 지원 가능 횟수에 따라 지원이 제한될 수 있습니다.
+                </div>
             </div>
 
             <button
               type="button"
               onClick={toggleGuide}
               aria-expanded={guideOpen}
-              style={guideToggleBtn}
+              style={{ ...guideToggleBtn, ...(isMobile ? { width: '100%' } : {}) }}
             >
               {guideOpen ? '접기 ▲' : '펼치기 ▼'}
             </button>
           </div>
 
           {guideOpen && (
-            <div style={{ marginTop: 12, fontSize: 15, color: '#0f172a', fontWeight: 850, lineHeight: 1.7 }}>
+            <div style={{ marginTop: 12, fontSize: isMobile ? 14 : 15, color: '#0f172a', fontWeight: 850, lineHeight: 1.7 }}>
               <div style={{ marginBottom: 8 }}>
                 <b>1)</b> 아래 표에서 <b>지역</b>을 확인하고, <b>기업명</b>을 입력합니다.
               </div>
@@ -922,14 +926,14 @@ export default function LeaderPage() {
             {groupBlocked || limitBlocked || restrictionBlocked ? <div style={badgeDanger}>지원 제한</div> : <div style={badgeInfo}>정상</div>}
           </div>
 
-          <div style={{ marginTop: 12, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 12 }}>
+            <div style={{ marginTop: 12, display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fit, minmax(280px, 1fr))', gap: 12 }}>
             {/* 오늘 지원 가능 조 (1줄 압축) */}
             <div style={{ ...subCard, background: innerBg, borderColor: innerBorder }}>
               <div style={{ fontSize: 13, color: '#64748b', fontWeight: 950 }}>오늘 지원 가능 조</div>
               <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                <div style={{ fontSize: 18, fontWeight: 950, letterSpacing: -0.2 }}>
+                  <div style={{ fontSize: isMobile ? 16 : 18, fontWeight: 950, letterSpacing: -0.2 }}>
                   오늘 지원 가능 조: <b>{activeGroupLabel}</b>
-                  <span style={{ marginLeft: 6, fontSize: 15, color: '#475569', fontWeight: 850 }}>
+                    <span style={{ marginLeft: 6, fontSize: isMobile ? 14 : 15, color: '#475569', fontWeight: 850 }}>
                     (내 소속: <b style={{ color: '#0f172a' }}>{myGroupLabel}</b>)
                   </span>
                 </div>
@@ -941,9 +945,9 @@ export default function LeaderPage() {
             <div style={{ ...subCard, background: innerBg, borderColor: innerBorder }}>
               <div style={{ fontSize: 13, color: '#64748b', fontWeight: 950 }}>하루 지원 가능 횟수</div>
               <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                <div style={{ fontSize: 18, fontWeight: 950, letterSpacing: -0.2 }}>
+                  <div style={{ fontSize: isMobile ? 16 : 18, fontWeight: 950, letterSpacing: -0.2 }}>
                   오늘 지원 가능: <b>{remainingTodayLabel}</b>
-                  <span style={{ marginLeft: 6, fontSize: 15, color: '#475569', fontWeight: 850 }}>
+                    <span style={{ marginLeft: 6, fontSize: isMobile ? 14 : 15, color: '#475569', fontWeight: 850 }}>
                     (
                     {isExempt ? (
                       <>
@@ -972,7 +976,7 @@ export default function LeaderPage() {
             <div style={{ ...subCard, background: innerBg, borderColor: innerBorder }}>
               <div style={{ fontSize: 13, color: '#64748b', fontWeight: 950 }}>패널티 상태</div>
               <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                <div style={{ fontSize: 18, fontWeight: 950, letterSpacing: -0.2 }}>
+                <div style={{ fontSize: isMobile ? 16 : 18, fontWeight: 950, letterSpacing: -0.2 }}>
                   무효콜 누적 <b>{invalidCallCount}</b>회
                 </div>
                 {restrictionBlocked ? (
@@ -996,12 +1000,12 @@ export default function LeaderPage() {
 
         {/* 지역별 TO 카드 */}
         <div style={{ ...card, marginTop: 16, padding: 0, overflow: 'hidden' }}>
-          <div style={cardHeader}>
+          <div style={{ ...cardHeader, ...(isMobile ? { padding: '12px', alignItems: 'stretch' } : {}) }}>
             <div>
               <div style={cardTitle}>지역별 배정 가능 수량(TO)</div>
               <div style={cardSubTitle}>실시간 현황 · 총 지원 {totalAppliedCount}건 · 기업명 입력 후 지원</div>
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexDirection: isMobile ? 'column' : 'row', width: isMobile ? '100%' : 'auto' }}>
               <button
                 type="button"
                 onClick={openReserveModal}
@@ -1014,17 +1018,19 @@ export default function LeaderPage() {
                   color: '#fff',
                   fontWeight: 900,
                   cursor: 'pointer',
+                  width: isMobile ? '100%' : 'auto',
                 }}
                 disabled={closedRegions.length === 0 || limitBlocked || groupBlocked || restrictionBlocked}
                 title={closedRegions.length === 0 ? '마감된 지역이 없어서 예비 등록이 필요 없습니다.' : '마감된 지역에 예비 등록합니다.'}
               >
                 예비등록
               </button>
-              <div style={{ fontSize: 12, color: '#64748b', fontWeight: 800 }}>Enter로 빠른 지원</div>
+              <div style={{ fontSize: 12, color: '#64748b', fontWeight: 800, width: isMobile ? '100%' : 'auto', textAlign: isMobile ? 'left' : 'right' }}>Enter로 빠른 지원</div>
             </div>
           </div>
 
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
+          <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', minWidth: 720, borderCollapse: 'collapse', fontSize: isMobile ? 13 : 14 }}>
             <thead>
               <tr style={{ background: '#f8fafc' }}>
                 <th style={{ ...thBig, textAlign: 'center' }}>지역</th>
@@ -1137,11 +1143,12 @@ export default function LeaderPage() {
               )}
             </tbody>
           </table>
+          </div>
         </div>
 
         {/* 내 지원 목록 */}
         <div style={{ ...card, marginTop: 16, padding: 0, overflow: 'hidden' }}>
-          <div style={cardHeader}>
+          <div style={{ ...cardHeader, ...(isMobile ? { padding: '12px' } : {}) }}>
             <div>
               <div style={cardTitle}>내 지원 목록</div>
               <div style={cardSubTitle}>
@@ -1150,7 +1157,8 @@ export default function LeaderPage() {
             </div>
           </div>
 
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+          <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', minWidth: 520, borderCollapse: 'collapse', fontSize: 13 }}>
             <thead>
               <tr style={{ background: '#f8fafc' }}>
                 <th style={thSmall}>시간</th>
@@ -1199,6 +1207,7 @@ export default function LeaderPage() {
               )}
             </tbody>
           </table>
+          </div>
         </div>
 
         {/* 예비 등록 모달 */}
@@ -1231,7 +1240,7 @@ export default function LeaderPage() {
                 overflow: 'hidden',
               }}
             >
-              <div style={{ padding: '14px 16px', borderBottom: '1px solid #eef2f7', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ padding: isMobile ? '12px' : '14px 16px', borderBottom: '1px solid #eef2f7', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexDirection: isMobile ? 'column' : 'row' }}>
                 <div>
                   <div style={{ fontSize: 16, fontWeight: 950, color: '#0f172a' }}>예비 등록</div>
                   <div style={{ marginTop: 4, fontSize: 12, color: '#64748b', fontWeight: 800 }}>
@@ -1249,6 +1258,7 @@ export default function LeaderPage() {
                     background: '#fff',
                     fontWeight: 900,
                     cursor: 'pointer',
+                    width: isMobile ? '100%' : 'auto',
                   }}
                 >
                   닫기
@@ -1312,14 +1322,14 @@ export default function LeaderPage() {
                 </div>
               </div>
 
-              <div style={{ padding: 16, borderTop: '1px solid #eef2f7', display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
-                <button type="button" onClick={() => setReserveOpen(false)} style={btnOutline} disabled={busyReserve}>
+              <div style={{ padding: 16, borderTop: '1px solid #eef2f7', display: 'flex', justifyContent: 'flex-end', gap: 10, flexDirection: isMobile ? 'column' : 'row' }}>
+                <button type="button" onClick={() => setReserveOpen(false)} style={{ ...btnOutline, ...(isMobile ? { width: '100%' } : {}) }} disabled={busyReserve}>
                   취소
                 </button>
                 <button
                   type="button"
                   onClick={submitReserve}
-                  style={{ ...btnPrimary, height: 38, minWidth: 120 }}
+                  style={{ ...btnPrimary, height: 38, minWidth: 120, ...(isMobile ? { width: '100%' } : {}) }}
                   disabled={busyReserve || closedRegions.length === 0 || limitBlocked || groupBlocked || restrictionBlocked}
                 >
                   {busyReserve ? '등록중…' : '예비 등록'}
@@ -1332,13 +1342,14 @@ export default function LeaderPage() {
         {/* 하단 로그아웃(보조) */}
         <div
           style={{
-            marginTop: 18,
-            display: 'flex',
-            justifyContent: 'flex-end',
-            gap: 10, // ← 여기만 추가
-          }}
-        >
-          <button onClick={() => router.push('/hr/calendar')} style={btnOutline}>
+              marginTop: 18,
+              display: 'flex',
+              justifyContent: isMobile ? 'stretch' : 'flex-end',
+              gap: 10, // ← 여기만 추가
+              flexDirection: isMobile ? 'column' : 'row',
+            }}
+          >
+          <button onClick={() => router.push('/hr/calendar')} style={{ ...btnOutline, ...(isMobile ? { width: '100%' } : {}) }}>
             휴가신청
           </button>
           <button
@@ -1346,7 +1357,7 @@ export default function LeaderPage() {
               await supabase.auth.signOut();
               router.replace('/login');
             }}
-            style={btnOutline}
+            style={{ ...btnOutline, ...(isMobile ? { width: '100%' } : {}) }}
           >
             로그아웃
           </button>

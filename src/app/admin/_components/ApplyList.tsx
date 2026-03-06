@@ -9,6 +9,7 @@ import {
   thSmall,
 } from '../styles';
 import RecordingsCell from './RecordingsCell';
+import { useIsMobile } from '@/hooks/useIsMobile';
 
 type RegionRow = {
   id: string;
@@ -110,6 +111,7 @@ export default function ApplyList({
   busySyncToSheet,
   formatDateTime,
 }: ApplyListProps) {
+  const isMobile = useIsMobile();
   const [showUnreviewedOnly, setShowUnreviewedOnly] = useState(false);
 
   const displayedApplies = useMemo(() => {
@@ -167,7 +169,7 @@ export default function ApplyList({
         maxWidth: 1400,
         border: '1px solid #e5e7eb',
         borderRadius: 14,
-        overflowX: 'auto',
+        overflowX: isMobile ? 'hidden' : 'auto',
         overflowY: 'hidden',
         background: '#fff',
         boxShadow: '0 10px 30px rgba(17, 24, 39, 0.06)',
@@ -181,23 +183,24 @@ export default function ApplyList({
           background: 'linear-gradient(180deg, #f9fafb 0%, #f3f4f6 100%)',
           borderBottom: '1px solid #eee',
           display: 'flex',
+          flexDirection: isMobile ? 'column' : 'row',
           justifyContent: 'space-between',
-          alignItems: 'center',
+          alignItems: isMobile ? 'stretch' : 'center',
           gap: 10,
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
+        <div style={{ display: 'flex', alignItems: isMobile ? 'flex-start' : 'baseline', flexDirection: isMobile ? 'column' : 'row', gap: 6 }}>
           <div style={{ fontSize: 15, fontWeight: 900 }}>팀장 지원 목록</div>
           <div style={{ fontSize: 12, color: '#6b7280' }}>
             총계 <b style={{ color: '#374151' }}>{totalApplies}</b>건 · 표시 <b style={{ color: '#374151' }}>{displayedApplies.length}</b>건
           </div>
         </div>
 
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', justifyContent: isMobile ? 'stretch' : 'flex-end', width: isMobile ? '100%' : 'auto' }}>
           <select
             value={applyRegionFilter}
             onChange={(e) => setApplyRegionFilter(e.target.value)}
-            style={{ ...input, height: 34, padding: '0 10px', width: 66 }}
+            style={{ ...input, height: 34, padding: '0 10px', width: isMobile ? 'calc(50% - 4px)' : 66, minWidth: isMobile ? 0 : 66 }}
           >
             <option value="">전체</option>
             {Array.from(regionsMap.values())
@@ -218,7 +221,7 @@ export default function ApplyList({
             autoCapitalize="none"
             autoCorrect="off"
             spellCheck={false}
-            style={{ ...input, height: 34, padding: '0 10px', width: 150 }}
+            style={{ ...input, height: 34, padding: '0 10px', width: isMobile ? 'calc(50% - 4px)' : 150, minWidth: isMobile ? 0 : 150 }}
           />
 
           <button
@@ -226,7 +229,7 @@ export default function ApplyList({
               onResetFilter();
               setShowUnreviewedOnly(false);
             }}
-            style={{ ...rowBtn, height: 34, padding: '0 10px', opacity: applyQuery || applyRegionFilter || showUnreviewedOnly ? 1 : 0.6 }}
+            style={{ ...rowBtn, height: 34, padding: '0 10px', opacity: applyQuery || applyRegionFilter || showUnreviewedOnly ? 1 : 0.6, width: isMobile ? 'calc(50% - 4px)' : 'auto' }}
             disabled={!applyQuery && !applyRegionFilter && !showUnreviewedOnly}
           >
             초기화
@@ -247,6 +250,8 @@ export default function ApplyList({
               color: '#334155',
               userSelect: 'none',
               whiteSpace: 'nowrap',
+              width: isMobile ? 'calc(50% - 4px)' : 'auto',
+              justifyContent: 'center',
             }}
           >
             <input
@@ -259,7 +264,7 @@ export default function ApplyList({
 
           <button
             onClick={handleDownloadExcel}
-            style={{ ...rowBtn, height: 34, padding: '0 10px', opacity: displayedApplies.length > 0 ? 1 : 0.6 }}
+            style={{ ...rowBtn, height: 34, padding: '0 10px', opacity: displayedApplies.length > 0 ? 1 : 0.6, width: isMobile ? '100%' : 'auto' }}
             disabled={displayedApplies.length === 0}
             title="현재 필터된 팀장 지원 목록을 엑셀(.xlsx)로 다운로드"
           >
@@ -272,6 +277,7 @@ export default function ApplyList({
               height: 34,
               padding: '0 10px',
               opacity: hasAnyApplies && !busySyncToSheet ? 1 : 0.6,
+              width: isMobile ? '100%' : 'auto',
             }}
             disabled={!hasAnyApplies || busySyncToSheet}
             title="현재 전체 팀장지원목록을 시트에 반영(기존 데이터 유지, 신규만 추가)"
@@ -282,13 +288,14 @@ export default function ApplyList({
       </div>
 
       <div style={{ padding: 12 }}>
-        <div style={{ maxHeight: 420, overflowY: 'auto', border: '1px solid #e5e7eb', borderRadius: 10 }}>
+        <div style={{ maxHeight: 420, overflowY: 'auto', overflowX: 'auto', border: '1px solid #e5e7eb', borderRadius: 10 }}>
           <table
             style={{
               borderCollapse: 'collapse',
-              fontSize: 14,
+              fontSize: isMobile ? 13 : 14,
               tableLayout: 'fixed',
               width: '100%',
+              minWidth: 1040,
             }}
           >
             <thead>
