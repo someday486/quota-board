@@ -256,6 +256,10 @@ export default function AdminPage() {
   const [reserveApplies, setReserveApplies] = useState<LiveApplyRow[]>([]);
   const [busyDelete, setBusyDelete] = useState<string | null>(null);
   const [busySyncSheet, setBusySyncSheet] = useState(false);
+  const totalAppliedCount = useMemo(
+    () => regionsStatus.reduce((sum, row) => sum + Number(row.applied_count ?? 0), 0),
+    [regionsStatus],
+  );
 
   const loadRegions = async () => {
     const { data, error } = await supabase
@@ -1530,7 +1534,9 @@ const copyBoardAsImage = async () => {
           <div style={{ padding: '10px 32px', borderBottom: '1px solid #eef2f7', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, minWidth: 0 }}>
               <div style={{ fontSize: 15, fontWeight: 900, whiteSpace: 'nowrap' }}>지역별 TO</div>
-              <div style={{ fontSize: 12, color: '#6b7280', whiteSpace: 'nowrap' }}>입력 · 저장</div>
+              <div style={{ fontSize: 12, color: '#6b7280', whiteSpace: 'nowrap' }}>
+                입력 · 저장 · 총 지원 {totalAppliedCount}건
+              </div>
             </div>
 
             <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
@@ -1925,6 +1931,7 @@ const copyBoardAsImage = async () => {
 
       <ApplyList
         filteredApplies={filteredApplies}
+        totalApplies={applies.length}
         hasAnyApplies={applies.length > 0}
         regionsMap={regionsMap}
         applyRegionFilter={applyRegionFilter}

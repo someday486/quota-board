@@ -1,6 +1,6 @@
 'use client';
 
-import type { Dispatch, SetStateAction } from 'react';
+import { useMemo, useState, type Dispatch, type SetStateAction } from 'react';
 import {
   dangerMiniBtn,
   input,
@@ -41,6 +41,7 @@ type CallRecordingRow = {
 
 type ApplyListProps = {
   filteredApplies: LiveApplyRow[];
+  totalApplies: number;
   hasAnyApplies: boolean;
   regionsMap: Map<string, RegionRow>;
   applyRegionFilter: string;
@@ -76,6 +77,7 @@ type ApplyListProps = {
 
 export default function ApplyList({
   filteredApplies,
+  totalApplies,
   hasAnyApplies,
   regionsMap,
   applyRegionFilter,
@@ -108,12 +110,19 @@ export default function ApplyList({
   busySyncToSheet,
   formatDateTime,
 }: ApplyListProps) {
+  const [showUnreviewedOnly, setShowUnreviewedOnly] = useState(false);
+
+  const displayedApplies = useMemo(() => {
+    if (!showUnreviewedOnly) return filteredApplies;
+    return filteredApplies.filter((a) => !recordingsByAppId[a.id]?.reviewed);
+  }, [filteredApplies, recordingsByAppId, showUnreviewedOnly]);
+
   const handleDownloadExcel = async () => {
-    if (filteredApplies.length === 0) return;
+    if (displayedApplies.length === 0) return;
 
     const rows: string[][] = [
       ['신청시각', '지역', '팀장', '기업명', '제외여부'],
-      ...filteredApplies.map((a) => [
+      ...displayedApplies.map((a) => [
         formatDateTime(a.created_at),
         regionsMap.get(a.region_id)?.region_name ?? a.region_id,
         a.leader_name ?? '',
@@ -179,7 +188,9 @@ export default function ApplyList({
       >
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
           <div style={{ fontSize: 15, fontWeight: 900 }}>팀장 지원 목록</div>
-          <div style={{ fontSize: 12, color: '#6b7280' }}>현재 · 삭제 가능</div>
+          <div style={{ fontSize: 12, color: '#6b7280' }}>
+            총계 <b style={{ color: '#374151' }}>{totalApplies}</b>건 · 표시 <b style={{ color: '#374151' }}>{displayedApplies.length}</b>건
+          </div>
         </div>
 
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
@@ -211,17 +222,45 @@ export default function ApplyList({
           />
 
           <button
-            onClick={onResetFilter}
-            style={{ ...rowBtn, height: 34, padding: '0 10px', opacity: applyQuery || applyRegionFilter ? 1 : 0.6 }}
-            disabled={!applyQuery && !applyRegionFilter}
+            onClick={() => {
+              onResetFilter();
+              setShowUnreviewedOnly(false);
+            }}
+            style={{ ...rowBtn, height: 34, padding: '0 10px', opacity: applyQuery || applyRegionFilter || showUnreviewedOnly ? 1 : 0.6 }}
+            disabled={!applyQuery && !applyRegionFilter && !showUnreviewedOnly}
           >
             초기화
           </button>
 
+          <label
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              height: 34,
+              padding: '0 10px',
+              borderRadius: 10,
+              border: '1px solid #e5e7eb',
+              background: '#fff',
+              fontSize: 12,
+              fontWeight: 800,
+              color: '#334155',
+              userSelect: 'none',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={showUnreviewedOnly}
+              onChange={(e) => setShowUnreviewedOnly(e.target.checked)}
+            />
+            검수 미완료만
+          </label>
+
           <button
             onClick={handleDownloadExcel}
-            style={{ ...rowBtn, height: 34, padding: '0 10px', opacity: filteredApplies.length > 0 ? 1 : 0.6 }}
-            disabled={filteredApplies.length === 0}
+            style={{ ...rowBtn, height: 34, padding: '0 10px', opacity: displayedApplies.length > 0 ? 1 : 0.6 }}
+            disabled={displayedApplies.length === 0}
             title="현재 필터된 팀장 지원 목록을 엑셀(.xlsx)로 다운로드"
           >
             팀장 지원 목록 다운로드
@@ -266,7 +305,7 @@ export default function ApplyList({
             </thead>
 
             <tbody>
-              {filteredApplies.map((a) => {
+              {displayedApplies.map((a) => {
                 const rn = regionsMap.get(a.region_id)?.region_name ?? a.region_id;
                 return (
                   <tr key={a.id} style={{ borderTop: '1px solid #eee', background: a.is_excluded ? '#f8fafc' : '#ffffff' }}>
@@ -428,7 +467,7 @@ export default function ApplyList({
                 );
               })}
 
-              {filteredApplies.length === 0 && (
+              {displayedApplies.length === 0 && (
                 <tr>
                   <td colSpan={8} style={{ padding: 12, color: '#666', textAlign: 'center' }}>
                     표시할 지원 내역이 없습니다.

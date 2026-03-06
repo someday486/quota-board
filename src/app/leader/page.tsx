@@ -343,6 +343,10 @@ export default function LeaderPage() {
   };
 
   const totalMyApplies = useMemo(() => myApplies.length, [myApplies]);
+  const totalAppliedCount = useMemo(
+    () => statusRows.reduce((sum, row) => sum + Number(row.applied_count ?? 0), 0),
+    [statusRows],
+  );
 
   const isExempt = useMemo(() => {
     if (!myUserId) return false;
@@ -992,7 +996,7 @@ export default function LeaderPage() {
           <div style={cardHeader}>
             <div>
               <div style={cardTitle}>지역별 배정 가능 수량(TO)</div>
-              <div style={cardSubTitle}>실시간 현황 · 기업명 입력 후 지원</div>
+              <div style={cardSubTitle}>실시간 현황 · 총 지원 {totalAppliedCount}건 · 기업명 입력 후 지원</div>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               <button
