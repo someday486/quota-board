@@ -14,6 +14,11 @@ type AuthState = {
   userId: string | null;
 };
 
+type AuthProfile = {
+  role?: string | null;
+  is_admin?: boolean | null;
+};
+
 export function useRequireAuth(options: RequireAuthOptions = {}): AuthState {
   const router = useRouter();
   const [checking, setChecking] = useState(true);
@@ -43,23 +48,30 @@ export function useRequireAuth(options: RequireAuthOptions = {}): AuthState {
 
       const { data: profile, error: profileErr } = await supabase
         .from('profiles')
-        .select('role')
+        .select('role,is_admin')
         .eq('user_id', uid)
         .single();
 
       if (cancelled) return;
 
-      const roleValue = (profile as { role?: string } | null)?.role ?? null;
-      setRole(roleValue);
+      const profileRow = (profile as AuthProfile | null) ?? null;
+      const roleValue = profileRow?.role ?? null;
+      const effectiveRole =
+        roleValue === 'admin' || Boolean(profileRow?.is_admin)
+          ? 'admin'
+          : roleValue === 'leader'
+            ? 'leader'
+            : null;
+      setRole(effectiveRole);
 
-      if (profileErr || !roleValue) {
+      if (profileErr || !effectiveRole) {
         router.replace('/login');
         return;
       }
 
-      if (roleValue !== options.requiredRole) {
-        if (roleValue === 'admin') router.replace('/admin');
-        else if (roleValue === 'leader') router.replace('/leader');
+      if (effectiveRole !== options.requiredRole) {
+        if (effectiveRole === 'admin') router.replace('/admin');
+        else if (effectiveRole === 'leader') router.replace('/leader');
         else router.replace('/login');
         return;
       }

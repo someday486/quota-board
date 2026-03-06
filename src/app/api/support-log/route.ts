@@ -17,7 +17,29 @@ type SupportLogPayload = {
   note?: string | null;
 };
 
+type ActorProfile = {
+  user_id: string;
+  display_name: string | null;
+  role: string | null;
+  is_admin: boolean | null;
+};
+
 type SheetsClient = ReturnType<typeof google.sheets>;
+type LogSheetRow = {
+  rowNumber: number;
+  values: string[];
+  applicationId: string;
+};
+
+const SUPPORT_LOG_HEADERS = [
+  'applied_at',
+  'leader_name',
+  'region_name',
+  'company_name',
+  'is_excluded',
+  'is_deleted',
+  'application_id',
+];
 
 function getBearerToken(req: NextRequest) {
   const authz = req.headers.get('authorization') || '';
@@ -75,21 +97,6 @@ function normalize(v: unknown) {
   return String(v ?? '').trim();
 }
 
-function parseAppliedLabelToEpoch(v: string) {
-  const m = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})$/.exec(v.trim());
-  if (m) {
-    const y = Number(m[1]);
-    const mo = Number(m[2]) - 1;
-    const d = Number(m[3]);
-    const h = Number(m[4]);
-    const mi = Number(m[5]);
-    const s = Number(m[6]);
-    return Date.UTC(y, mo, d, h - 9, mi, s);
-  }
-  const parsed = Date.parse(v);
-  return Number.isNaN(parsed) ? 0 : parsed;
-}
-
 function sameRowKey(
   row: string[],
   appliedAt: string,
@@ -106,19 +113,12 @@ function sameRowKey(
 }
 
 async function ensureHeader(sheets: SheetsClient, spreadsheetId: string, sheetTab: string) {
-  const check = await sheets.spreadsheets.values.get({
-    spreadsheetId,
-    range: sheetRange(sheetTab, 'A1:F1'),
-  });
-  const hasAny = (check.data.values?.[0] ?? []).some((cell) => String(cell ?? '').trim() !== '');
-  if (hasAny) return;
-
   await sheets.spreadsheets.values.update({
     spreadsheetId,
-    range: sheetRange(sheetTab, 'A1:F1'),
+    range: sheetRange(sheetTab, 'A1:G1'),
     valueInputOption: 'RAW',
     requestBody: {
-      values: [['applied_at', 'leader_name', 'region_name', 'company_name', 'is_excluded', 'is_deleted']],
+      values: [SUPPORT_LOG_HEADERS],
     },
   });
 }
@@ -181,6 +181,37 @@ function buildJwtAuth() {
   });
 }
 
+function toLogSheetRow(values: string[], rowNumber: number): LogSheetRow {
+  return {
+    rowNumber,
+    values: [
+      String(values[0] ?? ''),
+      String(values[1] ?? ''),
+      String(values[2] ?? ''),
+      String(values[3] ?? ''),
+      String(values[4] ?? ''),
+      String(values[5] ?? ''),
+      String(values[6] ?? ''),
+    ],
+    applicationId: normalize(values[6]),
+  };
+}
+
+function findMatchingRow(
+  rows: LogSheetRow[],
+  applicationId: string,
+  appliedAt: string,
+  leaderName: string,
+  regionName: string,
+  companyName: string,
+) {
+  if (applicationId) {
+    const byApplicationId = rows.find((row) => row.applicationId === applicationId);
+    if (byApplicationId) return byApplicationId;
+  }
+  return rows.find((row) => sameRowKey(row.values, appliedAt, leaderName, regionName, companyName));
+}
+
 export async function POST(req: NextRequest) {
   try {
     const supabaseUrl = env('NEXT_PUBLIC_SUPABASE_URL');
@@ -208,16 +239,21 @@ export async function POST(req: NextRequest) {
     });
     const { data: actor, error: actorErr } = await sbAdmin
       .from('profiles')
-      .select('user_id,display_name,role')
+      .select('user_id,display_name,role,is_admin')
       .eq('user_id', actorUserId)
       .maybeSingle();
     if (actorErr || !actor) {
       return NextResponse.json({ error: 'Failed to load actor profile' }, { status: 500 });
     }
+    const actorProfile = actor as ActorProfile;
+    const isAdmin = actorProfile.role === 'admin' || Boolean(actorProfile.is_admin);
 
     const payload = (await req.json().catch(() => null)) as SupportLogPayload | null;
     if (!payload?.event_type) {
       return NextResponse.json({ error: 'event_type is required' }, { status: 400 });
+    }
+    if (!isAdmin && payload.event_type !== 'APPLY' && payload.event_type !== 'RESERVE_APPLY') {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
     const sheetId = env('GOOGLE_SHEET_ID');
@@ -241,49 +277,59 @@ export async function POST(req: NextRequest) {
 
     const appliedAt = parseAppliedAt(payload.applied_at);
     const appliedAtLabel = formatKst(appliedAt);
-    const leaderName = payload.leader_name ?? '';
-    const regionName = payload.region_name ?? '';
-    const companyName = payload.company_name ?? '';
+    const applicationId = normalize(payload.application_id);
+    const leaderName = normalize(
+      isAdmin ? payload.leader_name : (actorProfile.display_name ?? payload.leader_name),
+    );
+    const regionName = normalize(payload.region_name);
+    const companyName = normalize(payload.company_name);
+    if (!leaderName || !regionName || !companyName) {
+      return NextResponse.json({ error: 'leader_name, region_name, company_name are required' }, { status: 400 });
+    }
     let excluded = Boolean(payload.is_excluded);
     if (payload.event_type === 'EXCEPTION_ON') excluded = true;
     if (payload.event_type === 'EXCEPTION_OFF') excluded = false;
     const deleted = payload.event_type === 'DELETE';
     const existing = await sheets.spreadsheets.values.get({
       spreadsheetId: sheetId,
-      range: sheetRange(sheetTab, 'A2:F'),
+      range: sheetRange(sheetTab, 'A2:G'),
     });
-    const rows: string[][] = (existing.data.values ?? []).map((r) => [
-      String(r?.[0] ?? ''),
-      String(r?.[1] ?? ''),
-      String(r?.[2] ?? ''),
-      String(r?.[3] ?? ''),
-      String(r?.[4] ?? ''),
-      String(r?.[5] ?? ''),
-    ]);
-
-    const idx = rows.findIndex((row) =>
-      sameRowKey(row, appliedAtLabel, leaderName, regionName, companyName),
+    const rows = (existing.data.values ?? []).map((row, index) =>
+      toLogSheetRow((row ?? []).map((cell) => String(cell ?? '')), index + 2),
     );
-    const nextRow = [appliedAtLabel, leaderName, regionName, companyName, toYN(excluded), toYN(deleted)];
+    const nextRow = [
+      appliedAtLabel,
+      leaderName,
+      regionName,
+      companyName,
+      toYN(excluded),
+      toYN(deleted),
+      applicationId,
+    ];
 
-    if (idx >= 0) {
-      rows[idx] = nextRow;
-    } else {
-      rows.push(nextRow);
-    }
+    const targetRow = findMatchingRow(
+      rows,
+      applicationId,
+      appliedAtLabel,
+      leaderName,
+      regionName,
+      companyName,
+    );
 
-    rows.sort((a, b) => parseAppliedLabelToEpoch(a[0]) - parseAppliedLabelToEpoch(b[0]));
-
-    await sheets.spreadsheets.values.clear({
-      spreadsheetId: sheetId,
-      range: sheetRange(sheetTab, 'A2:F'),
-    });
-    if (rows.length > 0) {
+    if (targetRow) {
       await sheets.spreadsheets.values.update({
         spreadsheetId: sheetId,
-        range: sheetRange(sheetTab, 'A2:F'),
+        range: sheetRange(sheetTab, `A${targetRow.rowNumber}:G${targetRow.rowNumber}`),
         valueInputOption: 'RAW',
-        requestBody: { values: rows },
+        requestBody: { values: [nextRow] },
+      });
+    } else {
+      await sheets.spreadsheets.values.append({
+        spreadsheetId: sheetId,
+        range: sheetRange(sheetTab, 'A2:G'),
+        valueInputOption: 'RAW',
+        insertDataOption: 'INSERT_ROWS',
+        requestBody: { values: [nextRow] },
       });
     }
 

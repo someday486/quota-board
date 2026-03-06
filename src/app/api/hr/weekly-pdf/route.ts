@@ -36,15 +36,32 @@ function ymdKorean(d = new Date()) {
 }
 
 // jsonb가 문자열/객체 등으로 올 수 있어서 안전하게 문자열로 뽑기
-function jsonbToString(v: any): string | null {
+function jsonbToString(v: unknown): string | null {
   if (v == null) return null;
   if (typeof v === 'string') return v;           // "boss.png" 형태로 이미 string이면 그대로
   if (typeof v === 'object') {
     // {"path":"boss.png"} 같은 구조면 여기서 처리
-    if (typeof v.path === 'string') return v.path;
+    if ('path' in v && typeof v.path === 'string') return v.path;
   }
   return null;
 }
+
+type AppSettingValueRow = {
+  value_json: unknown;
+};
+
+type WeeklyPdfRow = {
+  id: string;
+  user_id: string;
+  display_name: string | null;
+  leave_type: string;
+  start_date: string;
+  end_date: string;
+  days_count: number;
+  reason: string | null;
+  iso_year: number;
+  iso_week: number;
+};
 
 export async function GET(req: Request) {
   try {
@@ -101,7 +118,7 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: `app_settings read failed: ${setErr.message}` }, { status: 500 });
     }
 
-    const bossPath = jsonbToString((bossSetting as any)?.value_json);
+    const bossPath = jsonbToString((bossSetting as AppSettingValueRow | null)?.value_json);
     // bossPath 예: boss.png
 
     // 3) 템플릿 PDF 로드 (public/hr/leave_form_template.pdf)
@@ -141,7 +158,7 @@ export async function GET(req: Request) {
 
     const todayStr = ymdKorean(new Date());
 
-    for (const r of rows as any[]) {
+    for (const r of (rows as WeeklyPdfRow[])) {
       // template 로드 후 페이지 복사
       const base = await PDFDocument.load(templateBytes);
       const [page0] = await merged.copyPages(base, [0]);
@@ -220,8 +237,11 @@ export async function GET(req: Request) {
         'Content-Disposition': `attachment; filename="weekly_leave_${weekKey}.pdf"`,
       },
     });
-  } catch (e: any) {
+  } catch (e: unknown) {
     console.error(e);
-    return NextResponse.json({ error: e?.message ?? 'unknown error' }, { status: 500 });
+    return NextResponse.json(
+      { error: e instanceof Error ? e.message : 'unknown error' },
+      { status: 500 },
+    );
   }
 }

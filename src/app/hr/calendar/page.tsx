@@ -62,6 +62,27 @@ type WeeklyRow = {
   reason: string | null;
 };
 
+type ProfileSummaryRow = {
+  user_id: string;
+  role: string | null;
+  display_name: string | null;
+};
+
+type BalanceRow = {
+  earned_days: number | null;
+  used_days: number | null;
+  remaining_days: number | null;
+};
+
+type LeaveRequestRow = {
+  id: string;
+  leave_type: LeaveType;
+  start_date: string;
+  end_date: string;
+  days_count: number;
+  reason: string | null;
+};
+
 // ---------- date utils (KST 밀림 방지) ----------
 function formatYMDLocal(d: Date) {
   const y = d.getFullYear();
@@ -210,10 +231,11 @@ export default function Page() {
         .single();
 
       if (!error && p) {
+        const profile = p as ProfileSummaryRow;
         setMe({
           id: uid,
-          role: (p as any).role ?? 'leader',
-          display_name: (p as any).display_name ?? '',
+          role: profile.role ?? 'leader',
+          display_name: profile.display_name ?? '',
         });
       } else {
         setMe({ id: uid, role: 'leader', display_name: '' });
@@ -254,10 +276,11 @@ export default function Page() {
       setMyBalance(null);
       return;
     }
+    const balance = data as BalanceRow;
     setMyBalance({
-      earned_days: Number((data as any).earned_days ?? 0),
-      used_days: Number((data as any).used_days ?? 0),
-      remaining_days: Number((data as any).remaining_days ?? 0),
+      earned_days: Number(balance.earned_days ?? 0),
+      used_days: Number(balance.used_days ?? 0),
+      remaining_days: Number(balance.remaining_days ?? 0),
     });
   }
 
@@ -281,7 +304,7 @@ export default function Page() {
     }
 
     setMyLeaves(
-      ((data ?? []) as any[]).map((r) => ({
+      ((data ?? []) as LeaveRequestRow[]).map((r) => ({
         id: r.id,
         leave_type: r.leave_type,
         start_date: r.start_date,
@@ -449,8 +472,6 @@ export default function Page() {
       }
     }
 
-    const daysCount = reqType === 'annual' ? weekdaysBetween(reqStart, reqEnd) : 0.5;
-
     setReqSubmitting(true);
 
     const { error } = await supabase.rpc('request_leave_admin', {
@@ -535,15 +556,6 @@ export default function Page() {
     setCancelConfirmOpen(false);
     setDetailOpen(false);
     await refreshAll();
-  }
-
-  // admin weekly pdf download (??? ?????? ???)
-  function downloadWeeklyPdf() {
-    if (!weekKey) {
-      alert('?????????????');
-      return;
-    }
-    window.open(`/api/hr/weekly-pdf?week=${encodeURIComponent(weekKey)}`, '_blank');
   }
 
   async function getAccessToken() {

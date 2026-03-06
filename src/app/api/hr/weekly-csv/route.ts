@@ -15,6 +15,16 @@ type WeeklyViewRow = {
   iso_week: number;
 };
 
+type AuthProfileRow = {
+  role: string | null;
+  is_admin: boolean | null;
+};
+
+type EmailProfileRow = {
+  user_id: string;
+  email: string | null;
+};
+
 function parseWeekKey(weekKey: string) {
   // "2026-W06"
   const m = /^(\d{4})-W(\d{2})$/.exec(weekKey);
@@ -99,7 +109,7 @@ export async function GET(req: NextRequest) {
 
     const { data: me, error: meErr } = await sbAdmin
       .from('profiles')
-      .select('role')
+      .select('role,is_admin')
       .eq('user_id', uid)
       .single();
 
@@ -107,7 +117,8 @@ export async function GET(req: NextRequest) {
       console.error(meErr);
       return NextResponse.json({ error: 'Failed to read profile(role)' }, { status: 500 });
     }
-    if ((me as any)?.role !== 'admin') {
+    const profile = me as AuthProfileRow | null;
+    if (profile?.role !== 'admin' && !profile?.is_admin) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
@@ -151,7 +162,9 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Failed to fetch profiles(email)' }, { status: 500 });
     }
 
-    const emailMap = new Map<string, string>((profs ?? []).map((p: any) => [p.user_id, p.email ?? '']));
+    const emailMap = new Map<string, string>(
+      ((profs ?? []) as EmailProfileRow[]).map((p) => [p.user_id, p.email ?? '']),
+    );
 
     // 6) CSV 생성
     const lines: string[] = [];
@@ -184,8 +197,11 @@ export async function GET(req: NextRequest) {
         'Cache-Control': 'no-store',
       },
     });
-  } catch (e: any) {
+  } catch (e: unknown) {
     console.error(e);
-    return NextResponse.json({ error: e?.message ?? 'unknown error' }, { status: 500 });
+    return NextResponse.json(
+      { error: e instanceof Error ? e.message : 'unknown error' },
+      { status: 500 },
+    );
   }
 }

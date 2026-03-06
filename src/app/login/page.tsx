@@ -5,6 +5,18 @@ import { supabase } from '@/lib/supabase';
 import { useRouter } from 'next/navigation';
 import styles from './page.module.css';
 
+type AuthProfile = {
+  role?: string | null;
+  is_admin?: boolean | null;
+};
+
+function resolveRole(profile: AuthProfile | null) {
+  if (!profile) return null;
+  if (profile.role === 'admin' || profile.is_admin) return 'admin';
+  if (profile.role === 'leader') return 'leader';
+  return null;
+}
+
 export default function LoginPage() {
   const router = useRouter();
 
@@ -31,12 +43,13 @@ export default function LoginPage() {
 
       const { data: profile } = await supabase
         .from('profiles')
-        .select('role')
+        .select('role,is_admin')
         .eq('user_id', user.id)
         .single();
 
-      if (profile?.role === 'admin') router.replace('/admin');
-      else router.replace('/leader');
+      const nextRole = resolveRole((profile as AuthProfile | null) ?? null);
+      if (nextRole === 'admin') router.replace('/admin');
+      else if (nextRole === 'leader') router.replace('/leader');
     })();
 
     return () => {
@@ -65,7 +78,7 @@ export default function LoginPage() {
 
       const { data: profile, error: profileErr } = await supabase
         .from('profiles')
-        .select('role')
+        .select('role,is_admin')
         .eq('user_id', userId)
         .single();
 
@@ -74,8 +87,10 @@ export default function LoginPage() {
         return;
       }
 
-      if (profile?.role === 'admin') router.push('/admin');
-      else router.push('/leader');
+      const nextRole = resolveRole((profile as AuthProfile | null) ?? null);
+      if (nextRole === 'admin') router.push('/admin');
+      else if (nextRole === 'leader') router.push('/leader');
+      else setError('권한 정보가 올바르지 않습니다. 관리자에게 문의하세요.');
     } finally {
       setLoading(false);
     }

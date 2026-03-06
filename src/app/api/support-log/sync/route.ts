@@ -23,6 +23,21 @@ type ActorProfile = {
 };
 
 type SheetsClient = ReturnType<typeof google.sheets>;
+type LogSheetRow = {
+  rowNumber: number;
+  values: string[];
+  applicationId: string;
+};
+
+const SUPPORT_LOG_HEADERS = [
+  'applied_at',
+  'leader_name',
+  'region_name',
+  'company_name',
+  'is_excluded',
+  'is_deleted',
+  'application_id',
+];
 
 function env(name: string) {
   const raw = process.env[name];
@@ -113,44 +128,13 @@ function toYN(value: boolean) {
   return value ? 'Y' : 'N';
 }
 
-function makeDedupKey(appliedAt: string, leaderName: string, regionName: string, companyName: string) {
-  return [
-    appliedAt.trim(),
-    leaderName.trim().toLowerCase(),
-    regionName.trim().toLowerCase(),
-    companyName.trim().toLowerCase(),
-  ].join('|');
-}
-
-function parseAppliedLabelToEpoch(v: string) {
-  const m = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})$/.exec(v.trim());
-  if (m) {
-    const y = Number(m[1]);
-    const mo = Number(m[2]) - 1;
-    const d = Number(m[3]);
-    const h = Number(m[4]);
-    const mi = Number(m[5]);
-    const s = Number(m[6]);
-    return Date.UTC(y, mo, d, h - 9, mi, s);
-  }
-  const parsed = Date.parse(v);
-  return Number.isNaN(parsed) ? 0 : parsed;
-}
-
 async function ensureHeader(sheets: SheetsClient, spreadsheetId: string, sheetTab: string) {
-  const check = await sheets.spreadsheets.values.get({
-    spreadsheetId,
-    range: sheetRange(sheetTab, 'A1:F1'),
-  });
-  const hasAny = (check.data.values?.[0] ?? []).some((cell) => String(cell ?? '').trim() !== '');
-  if (hasAny) return;
-
   await sheets.spreadsheets.values.update({
     spreadsheetId,
-    range: sheetRange(sheetTab, 'A1:F1'),
+    range: sheetRange(sheetTab, 'A1:G1'),
     valueInputOption: 'RAW',
     requestBody: {
-      values: [['applied_at', 'leader_name', 'region_name', 'company_name', 'is_excluded', 'is_deleted']],
+      values: [SUPPORT_LOG_HEADERS],
     },
   });
 }
@@ -178,6 +162,56 @@ function buildJwtAuth() {
     key: privateKey,
     scopes: ['https://www.googleapis.com/auth/spreadsheets'],
   });
+}
+
+function normalize(v: unknown) {
+  return String(v ?? '').trim();
+}
+
+function toLogSheetRow(values: string[], rowNumber: number): LogSheetRow {
+  return {
+    rowNumber,
+    values: [
+      String(values[0] ?? ''),
+      String(values[1] ?? ''),
+      String(values[2] ?? ''),
+      String(values[3] ?? ''),
+      String(values[4] ?? ''),
+      String(values[5] ?? ''),
+      String(values[6] ?? ''),
+    ],
+    applicationId: normalize(values[6]),
+  };
+}
+
+function sameRowKey(
+  row: string[],
+  appliedAt: string,
+  leaderName: string,
+  regionName: string,
+  companyName: string,
+) {
+  return (
+    normalize(row[0]) === normalize(appliedAt) &&
+    normalize(row[1]) === normalize(leaderName) &&
+    normalize(row[2]) === normalize(regionName) &&
+    normalize(row[3]) === normalize(companyName)
+  );
+}
+
+function findMatchingRow(
+  rows: LogSheetRow[],
+  applicationId: string,
+  appliedAt: string,
+  leaderName: string,
+  regionName: string,
+  companyName: string,
+) {
+  if (applicationId) {
+    const byApplicationId = rows.find((row) => row.applicationId === applicationId);
+    if (byApplicationId) return byApplicationId;
+  }
+  return rows.find((row) => sameRowKey(row.values, appliedAt, leaderName, regionName, companyName));
 }
 
 export async function POST(req: NextRequest) {
@@ -236,26 +270,21 @@ export async function POST(req: NextRequest) {
     await ensureSheetTabExists(sheets, sheetId, sheetTab);
     await ensureHeader(sheets, sheetId, sheetTab);
 
-    const seen = new Set<string>();
     const valuesToAppend: string[][] = [];
     let skipped = 0;
+    let updated = 0;
 
     const existing = await sheets.spreadsheets.values.get({
       spreadsheetId: sheetId,
-      range: sheetRange(sheetTab, 'A2:F'),
+      range: sheetRange(sheetTab, 'A2:G'),
     });
-    const existingRows = existing.data.values ?? [];
-    for (const row of existingRows) {
-      const appliedAt = String(row[0] ?? '').trim();
-      const leaderName = String(row[1] ?? '').trim();
-      const regionName = String(row[2] ?? '').trim();
-      const companyName = String(row[3] ?? '').trim();
-      if (!appliedAt || !leaderName || !regionName || !companyName) continue;
-      seen.add(makeDedupKey(appliedAt, leaderName, regionName, companyName));
-    }
+    const existingRows = (existing.data.values ?? []).map((row, index) =>
+      toLogSheetRow((row ?? []).map((cell) => String(cell ?? '')), index + 2),
+    );
 
     for (const r of sortedIncoming) {
       const appliedAt = formatKst(parseAppliedAt(r.applied_at));
+      const applicationId = normalize(r.application_id);
       const leaderName = String(r.leader_name ?? '').trim();
       const regionName = String(r.region_name ?? r.region_id ?? '').trim();
       const companyName = String(r.company_name ?? '').trim();
@@ -263,28 +292,52 @@ export async function POST(req: NextRequest) {
         skipped += 1;
         continue;
       }
-      const key = makeDedupKey(appliedAt, leaderName, regionName, companyName);
-      if (seen.has(key)) {
-        skipped += 1;
-        continue;
-      }
-      seen.add(key);
-
-      valuesToAppend.push([
+      const nextRow = [
         appliedAt,
         leaderName,
         regionName,
         companyName,
         toYN(Boolean(r.is_excluded)),
         'N',
-      ]);
+        applicationId,
+      ];
+
+      const existingRow = findMatchingRow(
+        existingRows,
+        applicationId,
+        appliedAt,
+        leaderName,
+        regionName,
+        companyName,
+      );
+
+      if (existingRow) {
+        if (existingRow.values.join('\u0001') === nextRow.join('\u0001')) {
+          skipped += 1;
+          continue;
+        }
+        await sheets.spreadsheets.values.update({
+          spreadsheetId: sheetId,
+          range: sheetRange(sheetTab, `A${existingRow.rowNumber}:G${existingRow.rowNumber}`),
+          valueInputOption: 'RAW',
+          requestBody: { values: [nextRow] },
+        });
+        existingRow.values = nextRow;
+        existingRow.applicationId = applicationId;
+        updated += 1;
+        continue;
+      }
+
+      valuesToAppend.push(nextRow);
+      existingRows.push(
+        toLogSheetRow(nextRow, existingRows.length + valuesToAppend.length + 2),
+      );
     }
 
-    valuesToAppend.sort((a, b) => parseAppliedLabelToEpoch(a[0]) - parseAppliedLabelToEpoch(b[0]));
     if (valuesToAppend.length > 0) {
       await sheets.spreadsheets.values.append({
         spreadsheetId: sheetId,
-        range: sheetRange(sheetTab, 'A2:F'),
+        range: sheetRange(sheetTab, 'A2:G'),
         valueInputOption: 'RAW',
         insertDataOption: 'INSERT_ROWS',
         requestBody: { values: valuesToAppend },
@@ -294,6 +347,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       ok: true,
       appended: valuesToAppend.length,
+      updated,
       skipped,
     });
   } catch (e: unknown) {

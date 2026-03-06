@@ -12,22 +12,14 @@ import ReserveList from './_components/ReserveList';
 import QuotaBoard from './_components/QuotaBoard';
 import { useAdminPage } from './_hooks/useAdminPage';
 import {
-  dangerBtn,
-  dangerMiniBtn,
   input,
-  miniBtn,
   miniDangerBtn,
-  miniInput,
   miniPrimaryBtn,
   pillClosed,
   pillOpen,
-  primaryBtn,
   REGION_BOARD_COLOR,
   rowBtn,
   td,
-  tdSmall,
-  th,
-  thSmall,
 } from './styles';
 
 type RegionStatusRow = {
@@ -108,6 +100,40 @@ type CallRecordingRow = {
   reviewed_at: string | null;
   reviewed_by: string | null;
 };
+
+type ApplicationLiveDbRow = {
+  id: string;
+  created_at: string;
+  region_id: string;
+  leader_name: string | null;
+  company_name: string | null;
+  is_excluded: boolean | null;
+  is_reserve: boolean | null;
+};
+
+type AppSettingsIntRow = {
+  value_int: number | null;
+};
+
+type AppSettingsJsonRow = {
+  value_json: unknown;
+};
+
+type TodayCountRow = {
+  user_id: string | null;
+  created_at: string;
+};
+
+type RecordingPathRow = {
+  file_path: string | null;
+};
+
+type SupabaseErrorLike = {
+  code?: string;
+  message?: string;
+};
+
+type ClipboardItemConstructor = new (items: Record<string, Blob>) => ClipboardItem;
 const fmtDT = (v?: string | null) => {
   if (!v) return '';
   const d = new Date(v);
@@ -348,7 +374,7 @@ const loadRecordings = async (appIds: string[]) => {
       return;
     }
 
-    const listRaw = (data as any[]) ?? [];
+    const listRaw = (data as ApplicationLiveDbRow[]) ?? [];
     const listAll: LiveApplyRow[] = listRaw.map((x) => ({
       id: String(x.id),
       created_at: String(x.created_at),
@@ -496,8 +522,9 @@ const handleDeleteRecording = async (applicationId: string) => {
     if (openPlayerAppId === applicationId) setOpenPlayerAppId(null);
 
     pushToast('success', '녹취 삭제 완료');
-  } catch (e: any) {
-    alert(`삭제 중 오류: ${e?.message ?? String(e)}`);
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : String(e);
+    alert(`삭제 중 오류: ${message}`);
   }
 };
 
@@ -643,8 +670,8 @@ const handleToggleReviewed = async (applicationId: string, checked: boolean) => 
       await loadApplies();
       await loadStatus();
       await loadTodayCounts();
-    } catch (e: any) {
-      setErrorMsg(e?.message ?? String(e));
+    } catch (e: unknown) {
+      setErrorMsg(e instanceof Error ? e.message : String(e));
     } finally {
       setBusyDelete(null);
     }
@@ -832,7 +859,7 @@ const handleToggleReviewed = async (applicationId: string, checked: boolean) => 
       });
 
       const json = (await res.json().catch(() => null)) as
-        | { appended?: number; skipped?: number; error?: string }
+        | { appended?: number; updated?: number; skipped?: number; error?: string }
         | null;
 
       if (!res.ok) {
@@ -840,8 +867,9 @@ const handleToggleReviewed = async (applicationId: string, checked: boolean) => 
       }
 
       const appended = Number(json?.appended ?? 0);
+      const updated = Number(json?.updated ?? 0);
       const skipped = Number(json?.skipped ?? 0);
-      pushToast('success', `시트 동기화 완료 (추가 ${appended}건, 중복 제외 ${skipped}건)`);
+      pushToast('success', `시트 동기화 완료 (추가 ${appended}건, 갱신 ${updated}건, 건너뜀 ${skipped}건)`);
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : '시트 동기화 중 오류가 발생했습니다.';
       setErrorMsg(message);
@@ -859,7 +887,7 @@ const handleToggleReviewed = async (applicationId: string, checked: boolean) => 
       .maybeSingle();
 
     if (error) {
-      const code = (error as any)?.code;
+      const code = (error as SupabaseErrorLike)?.code;
       // 테이블이 아직 없을 수도 있으므로, 이 경우에는 메시지로만 안내
       if (code === '42P01') {
         setErrorMsg('app_settings 테이블이 없어 1인당 하루 한도 설정을 불러올 수 없습니다. (DB에 app_settings 생성 필요)');
@@ -869,7 +897,7 @@ const handleToggleReviewed = async (applicationId: string, checked: boolean) => 
       return;
     }
 
-    const v = Number((data as any)?.value_int ?? 0);
+    const v = Number((data as AppSettingsIntRow | null)?.value_int ?? 0);
     const safe = Number.isFinite(v) ? Math.max(0, Math.trunc(v)) : 0;
     setApplyLimit(safe);
     setApplyLimitInput(String(safe));
@@ -883,13 +911,13 @@ const handleToggleReviewed = async (applicationId: string, checked: boolean) => 
       .maybeSingle();
 
     if (error) {
-      const code = (error as any)?.code;
+      const code = (error as SupabaseErrorLike)?.code;
       if (code === '42P01') return; // app_settings 없음
       setErrorMsg(`예외 목록 불러오기 실패: ${error.message}`);
       return;
     }
 
-    const raw = (data as any)?.value_json;
+    const raw = (data as AppSettingsJsonRow | null)?.value_json;
     const arr = Array.isArray(raw) ? raw : [];
     setExemptUserIds(arr.map(String));
   };
@@ -903,13 +931,13 @@ const handleToggleReviewed = async (applicationId: string, checked: boolean) => 
       .maybeSingle();
 
     if (error) {
-      const code = (error as any)?.code;
+      const code = (error as SupabaseErrorLike)?.code;
       if (code === '42P01') return; // app_settings 없음
       setErrorMsg(`오늘 지원 조 불러오기 실패: ${error.message}`);
       return;
     }
 
-    const v = Number((data as any)?.value_int ?? 0);
+    const v = Number((data as AppSettingsIntRow | null)?.value_int ?? 0);
     const safe = Number.isFinite(v) ? Math.max(0, Math.min(2, Math.trunc(v))) : 0;
     setActiveGroup(safe);
   };
@@ -970,7 +998,7 @@ const loadLeaders = async () => {
     }
 
     const counts: Record<string, number> = {};
-    for (const row of (data as any[]) ?? []) {
+    for (const row of (data as TodayCountRow[]) ?? []) {
       const uid = String(row.user_id ?? '').trim();
       if (!uid) continue;
       counts[uid] = (counts[uid] ?? 0) + 1;
@@ -1024,7 +1052,7 @@ const loadLeaders = async () => {
       );
 
     if (error) {
-      const code = (error as any)?.code;
+      const code = (error as SupabaseErrorLike)?.code;
       if (code === '42P01') {
         setErrorMsg('app_settings 테이블이 없어 1인당 하루 한도 설정을 저장할 수 없습니다. (DB에 app_settings 생성 필요)');
         setBusyApplyLimit(false);
@@ -1061,7 +1089,7 @@ const loadLeaders = async () => {
         return;
       }
 
-      const paths = (recs as any[] | null)?.map((r) => String(r.file_path ?? '')).filter(Boolean) ?? [];
+      const paths = (recs as RecordingPathRow[] | null)?.map((r) => String(r.file_path ?? '')).filter(Boolean) ?? [];
 
       if (paths.length > 0) {
         const { error: rmErr } = await supabase.storage.from('call_recordings').remove(paths);
@@ -1152,17 +1180,10 @@ const copyBoardAsImage = async () => {
     }
     ctx.scale(dpr, dpr);
 
-    // 공통 폰트
-    const font = (w: number) => `normal ${w} 12px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans KR", Arial`;
-    const fontBold = (w: number) => `normal ${w} 12px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans KR", Arial`;
-
     // 색
     const border = '#e6e6e6';
     const text = '#111';
-    const subText = '#333';
-    const dash = '#bbb';
     const white = '#ffffff';
-    const grid = '#d9d9d9';       // 내부 그리드(연하지만 존재감)
     const gridBold = '#333333';   // 구획선/외곽선(진하게)
     const headerBg = '#f2f2f2';   // 헤더 배경 (더 명확)
 
@@ -1332,9 +1353,9 @@ const copyBoardAsImage = async () => {
       return;
     }
 
-    if (navigator.clipboard && 'write' in navigator.clipboard && (window as any).ClipboardItem) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const ClipboardItemCtor: any = (window as any).ClipboardItem;
+    const clipboardWindow = window as Window & { ClipboardItem?: ClipboardItemConstructor };
+    if (navigator.clipboard && 'write' in navigator.clipboard && clipboardWindow.ClipboardItem) {
+      const ClipboardItemCtor = clipboardWindow.ClipboardItem;
 
       await navigator.clipboard.write([
         new ClipboardItemCtor({
@@ -1353,8 +1374,9 @@ const copyBoardAsImage = async () => {
       URL.revokeObjectURL(url);
       pushToast('info', '클립보드 복사가 지원되지 않아 PNG 파일로 다운로드했습니다.');
     }
-  } catch (e: any) {
-    setErrorMsg(`이미지 복사 실패: ${e?.message ?? String(e)}`);
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : String(e);
+    setErrorMsg(`이미지 복사 실패: ${message}`);
   } finally {
     setBusyCopyBoard(false);
   }
@@ -1407,7 +1429,7 @@ const copyBoardAsImage = async () => {
           display_name: name || p.user_id,
           today_count: todayCountsByUserId[p.user_id] ?? 0,
           is_exempt: ex.has(p.user_id),
-          leader_group: (p as any).leader_group ?? null,
+          leader_group: p.leader_group ?? null,
         };
       })
       .filter((r) => {

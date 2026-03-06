@@ -45,6 +45,19 @@ type AppSettingRow = {
   value_int: number;
 };
 
+type AppSettingJsonRow = {
+  value_json: unknown;
+};
+
+type InsertedApplyRow = {
+  id: string;
+  created_at?: string | null;
+};
+
+type RealtimeSettingRow = {
+  key?: string | null;
+};
+
 const REGION_COLOR: Record<string, string> = {
   부산: '#cfe6c3',
   대구: '#f2c7f3',
@@ -58,7 +71,6 @@ const REGION_COLOR: Record<string, string> = {
 const LIMIT_SETTING_KEY = 'apply_limit_per_user_per_day';
 const EXEMPT_SETTING_KEY = 'apply_limit_exempt_user_ids';
 const GROUP_SETTING_KEY = 'active_leader_group'; // 0=전체, 1=1조, 2=2조
-const ACTIVE_GROUP_KEY = 'active_leader_group';
 
 function getLocalDayRangeISO() {
   const start = new Date();
@@ -272,7 +284,7 @@ export default function LeaderPage() {
       return;
     }
 
-    const raw = (data as any)?.value_json;
+    const raw = (data as AppSettingJsonRow | null)?.value_json;
     const arr = Array.isArray(raw) ? raw : [];
     setExemptUserIds(arr.map(String));
   };
@@ -461,8 +473,8 @@ export default function LeaderPage() {
           .order('created_at', { ascending: false })
           .limit(1)
           .maybeSingle();
-        newApplicationId = (latest as { id: string } | null)?.id ?? null;
-        newAppliedAt = (latest as { created_at?: string | null } | null)?.created_at ?? null;
+        newApplicationId = (latest as InsertedApplyRow | null)?.id ?? null;
+        newAppliedAt = (latest as InsertedApplyRow | null)?.created_at ?? null;
       }
 
       await appendSupportLog({
@@ -561,7 +573,7 @@ export default function LeaderPage() {
           company_name: c,
           is_reserve: true,
           is_excluded: false,
-        } as any)
+        })
         .select('id, created_at')
         .maybeSingle();
 
@@ -572,8 +584,8 @@ export default function LeaderPage() {
 
       await appendSupportLog({
         event_type: 'RESERVE_APPLY',
-        applied_at: (inserted as { created_at?: string | null } | null)?.created_at ?? null,
-        application_id: (inserted as { id: string } | null)?.id ?? null,
+        applied_at: (inserted as InsertedApplyRow | null)?.created_at ?? null,
+        application_id: (inserted as InsertedApplyRow | null)?.id ?? null,
         leader_name: leaderName,
         region_id: rid,
         region_name: regionsMap.get(rid)?.region_name ?? rid,
@@ -687,8 +699,8 @@ export default function LeaderPage() {
 
           // ✅ app_settings 구독은 "한 번만" 둡니다 (아래 중복 구독은 삭제할 예정)
           .on('postgres_changes', { event: '*', schema: 'public', table: 'app_settings' }, (payload) => {
-            const nk = (payload?.new as any)?.key;
-            const ok = (payload?.old as any)?.key;
+            const nk = ((payload?.new ?? null) as RealtimeSettingRow | null)?.key;
+            const ok = ((payload?.old ?? null) as RealtimeSettingRow | null)?.key;
 
             if (nk === LIMIT_SETTING_KEY || ok === LIMIT_SETTING_KEY) loadLimit();
             if (nk === EXEMPT_SETTING_KEY || ok === EXEMPT_SETTING_KEY) loadExempt();
@@ -767,15 +779,6 @@ export default function LeaderPage() {
       if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const todayText = useMemo(() => {
-    const d = new Date();
-    const yyyy = d.getFullYear();
-    const mm = String(d.getMonth() + 1).padStart(2, '0');
-    const dd = String(d.getDate()).padStart(2, '0');
-    const day = ['일', '월', '화', '수', '목', '금', '토'][d.getDay()];
-    return `${yyyy}.${mm}.${dd}. (${day})`;
   }, []);
 
   if (checking) {
@@ -1464,17 +1467,6 @@ const badgeInfo: React.CSSProperties = {
   fontSize: 12,
 };
 
-const badgeWarning: React.CSSProperties = {
-  alignSelf: 'flex-start',
-  padding: '6px 10px',
-  borderRadius: 999,
-  border: '1px solid #fde68a',
-  background: '#fffbeb',
-  color: '#92400e',
-  fontWeight: 950,
-  fontSize: 12,
-};
-
 const badgeDanger: React.CSSProperties = {
   alignSelf: 'flex-start',
   padding: '6px 10px',
@@ -1496,15 +1488,6 @@ const guideToggleBtn: React.CSSProperties = {
   fontSize: 14,
   color: '#0f172a',
   whiteSpace: 'nowrap',
-};
-
-const guideNoteBox: React.CSSProperties = {
-  marginTop: 10,
-  padding: 12,
-  borderRadius: 14,
-  background: '#f8fafc',
-  border: '1px solid #e2e8f0',
-  color: '#0f172a',
 };
 
 const subCard: React.CSSProperties = {
