@@ -237,8 +237,22 @@ export async function POST(req: NextRequest) {
     await ensureHeader(sheets, sheetId, sheetTab);
 
     const seen = new Set<string>();
-    const values: string[][] = [];
+    const valuesToAppend: string[][] = [];
     let skipped = 0;
+
+    const existing = await sheets.spreadsheets.values.get({
+      spreadsheetId: sheetId,
+      range: sheetRange(sheetTab, 'A2:F'),
+    });
+    const existingRows = existing.data.values ?? [];
+    for (const row of existingRows) {
+      const appliedAt = String(row[0] ?? '').trim();
+      const leaderName = String(row[1] ?? '').trim();
+      const regionName = String(row[2] ?? '').trim();
+      const companyName = String(row[3] ?? '').trim();
+      if (!appliedAt || !leaderName || !regionName || !companyName) continue;
+      seen.add(makeDedupKey(appliedAt, leaderName, regionName, companyName));
+    }
 
     for (const r of sortedIncoming) {
       const appliedAt = formatKst(parseAppliedAt(r.applied_at));
@@ -256,7 +270,7 @@ export async function POST(req: NextRequest) {
       }
       seen.add(key);
 
-      values.push([
+      valuesToAppend.push([
         appliedAt,
         leaderName,
         regionName,
@@ -266,23 +280,20 @@ export async function POST(req: NextRequest) {
       ]);
     }
 
-    values.sort((a, b) => parseAppliedLabelToEpoch(a[0]) - parseAppliedLabelToEpoch(b[0]));
-    await sheets.spreadsheets.values.clear({
-      spreadsheetId: sheetId,
-      range: sheetRange(sheetTab, 'A2:F'),
-    });
-    if (values.length > 0) {
-      await sheets.spreadsheets.values.update({
+    valuesToAppend.sort((a, b) => parseAppliedLabelToEpoch(a[0]) - parseAppliedLabelToEpoch(b[0]));
+    if (valuesToAppend.length > 0) {
+      await sheets.spreadsheets.values.append({
         spreadsheetId: sheetId,
         range: sheetRange(sheetTab, 'A2:F'),
         valueInputOption: 'RAW',
-        requestBody: { values },
+        insertDataOption: 'INSERT_ROWS',
+        requestBody: { values: valuesToAppend },
       });
     }
 
     return NextResponse.json({
       ok: true,
-      appended: values.length,
+      appended: valuesToAppend.length,
       skipped,
     });
   } catch (e: unknown) {

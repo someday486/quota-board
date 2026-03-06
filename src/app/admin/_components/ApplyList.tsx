@@ -274,7 +274,7 @@ export default function ApplyList({
               opacity: hasAnyApplies && !busySyncToSheet ? 1 : 0.6,
             }}
             disabled={!hasAnyApplies || busySyncToSheet}
-            title="현재 전체 팀장지원목록을 시트에 반영(기존 데이터 대체)"
+            title="현재 전체 팀장지원목록을 시트에 반영(기존 데이터 유지, 신규만 추가)"
           >
             {busySyncToSheet ? '동기화중...' : '시트 동기화'}
           </button>
