@@ -134,6 +134,18 @@ export default function LeaderPage() {
   const [myGroup, setMyGroup] = useState<number | null>(null);
   const [invalidCallCount, setInvalidCallCount] = useState<number>(0);
   const [restrictedUntil, setRestrictedUntil] = useState<string | null>(null);
+  const todayLabel = useMemo(() => {
+    try {
+      return new Date().toLocaleDateString('ko-KR', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        weekday: 'short',
+      });
+    } catch {
+      return '';
+    }
+  }, []);
 
   // 가이드(사용 방법) 접기/펼치기: 기본=펼침, 사용자 선택 저장
   const GUIDE_KEY = "qb_leader_guide_open";
@@ -806,7 +818,17 @@ export default function LeaderPage() {
         {/* 헤더 */}
         <div style={{ ...headerCard, ...(isMobile ? { padding: '16px 14px', alignItems: 'stretch' } : {}) }}>
           <div>
-            <div style={{ fontSize: 18, fontWeight: 900 }}>팀장 대시보드</div>
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: isMobile ? 'column' : 'row',
+                alignItems: isMobile ? 'flex-start' : 'center',
+                gap: 8,
+              }}
+            >
+              <div style={{ fontSize: 18, fontWeight: 900 }}>팀장 대시보드</div>
+              {todayLabel ? <div style={todayBadge}>오늘 {todayLabel}</div> : null}
+            </div>
             <div style={{ marginTop: 4, fontSize: 12, color: '#64748b', fontWeight: 700 }}>
               현재 사용자: <b style={{ color: '#0f172a' }}>{leaderName}</b>
             </div>
@@ -1476,6 +1498,20 @@ const badgeInfo: React.CSSProperties = {
   color: '#0c4a6e',
   fontWeight: 950,
   fontSize: 12,
+};
+
+const todayBadge: React.CSSProperties = {
+  alignSelf: 'flex-start',
+  padding: '7px 12px',
+  borderRadius: 999,
+  border: '1px solid #bfdbfe',
+  background: 'linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%)',
+  color: '#1d4ed8',
+  fontWeight: 950,
+  fontSize: 13,
+  letterSpacing: '-0.1px',
+  whiteSpace: 'nowrap',
+  boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.75)',
 };
 
 const badgeDanger: React.CSSProperties = {
