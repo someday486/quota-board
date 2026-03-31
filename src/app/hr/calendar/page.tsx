@@ -4,6 +4,7 @@ import FullCalendar from '@fullcalendar/react';
 import dayGridPlugin from '@fullcalendar/daygrid';
 import interactionPlugin from '@fullcalendar/interaction';
 import koLocale from '@fullcalendar/core/locales/ko';
+import KoreanLunarCalendar from 'korean-lunar-calendar';
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
@@ -85,6 +86,7 @@ type LeaveRequestRow = {
 };
 
 type CenterEventCategory = 'birthday' | 'award' | 'dinner' | 'meeting' | 'notice';
+type BirthdayCalendarType = 'solar' | 'lunar';
 
 type CenterEventRow = {
   id: string;
@@ -93,6 +95,9 @@ type CenterEventRow = {
   start_date: string;
   end_date: string;
   description: string | null;
+  recurs_annually: boolean;
+  birthday_calendar_type: BirthdayCalendarType;
+  birthday_is_intercalation: boolean;
 };
 
 type CalendarEntry =
@@ -205,6 +210,14 @@ function weekdaysBetween(start: string, end: string) {
   return cnt;
 }
 
+function daysBetweenInclusive(start: string, end: string) {
+  const s = new Date(start + 'T00:00:00');
+  const e = new Date(end + 'T00:00:00');
+  if (e < s) return 0;
+
+  return Math.floor((e.getTime() - s.getTime()) / 86400000) + 1;
+}
+
 function labelOf(t: LeaveType) {
   if (t === 'annual') return '연차';
   if (t === 'half_am') return '오전반차';
@@ -232,7 +245,50 @@ function selectedTitleOf(entry: CalendarEntry) {
 }
 
 function isMissingCenterCalendarTableError(error: { code?: string; message?: string }) {
-  return error.code === 'PGRST205' || error.code === '42P01' || error.message?.includes('support_center_calendar_events');
+  return (
+    error.code === 'PGRST205' ||
+    error.code === '42P01' ||
+    error.message?.includes('support_center_calendar_events') ||
+    error.message?.includes('recurs_annually') ||
+    error.message?.includes('birthday_calendar_type') ||
+    error.message?.includes('birthday_is_intercalation')
+  );
+}
+
+function buildAnnualDate(targetYear: number, originalDate: string) {
+  const [, monthStr, dayStr] = originalDate.split('-');
+  const month = Number(monthStr);
+  const day = Number(dayStr);
+  const lastDay = new Date(targetYear, month, 0).getDate();
+  const safeDay = Math.min(day, lastDay);
+
+  return `${targetYear}-${String(month).padStart(2, '0')}-${String(safeDay).padStart(2, '0')}`;
+}
+
+function rangesOverlap(startA: string, endA: string, startB: string, endB: string) {
+  return startA <= endB && endA >= startB;
+}
+
+function convertLunarBirthdayToSolar(targetYear: number, originalDate: string, intercalation: boolean) {
+  const [, monthStr, dayStr] = originalDate.split('-');
+  const calendar = new KoreanLunarCalendar();
+  const ok = calendar.setLunarDate(targetYear, Number(monthStr), Number(dayStr), intercalation);
+  if (!ok) return null;
+
+  const solar = calendar.getSolarCalendar();
+  return `${solar.year}-${String(solar.month).padStart(2, '0')}-${String(solar.day).padStart(2, '0')}`;
+}
+
+function buildRecurringCenterEventDates(targetYear: number, row: CenterEventRow) {
+  if (row.category === 'birthday' && row.birthday_calendar_type === 'lunar') {
+    const solarDate = convertLunarBirthdayToSolar(targetYear, row.start_date, row.birthday_is_intercalation);
+    if (!solarDate) return null;
+    return { start: solarDate, end: solarDate };
+  }
+
+  const start = buildAnnualDate(targetYear, row.start_date);
+  const end = buildAnnualDate(targetYear, row.end_date);
+  return { start, end: end < start ? start : end };
 }
 
 function ymRangeFor(date: Date) {
@@ -328,6 +384,9 @@ export default function Page() {
   const [centerEventStart, setCenterEventStart] = useState('');
   const [centerEventEnd, setCenterEventEnd] = useState('');
   const [centerEventDescription, setCenterEventDescription] = useState('');
+  const [centerEventRepeatsAnnually, setCenterEventRepeatsAnnually] = useState(false);
+  const [birthdayCalendarType, setBirthdayCalendarType] = useState<BirthdayCalendarType>('solar');
+  const [birthdayIsIntercalation, setBirthdayIsIntercalation] = useState(false);
   const [centerEventSubmitting, setCenterEventSubmitting] = useState(false);
 
   // dashboard common
@@ -394,9 +453,7 @@ export default function Page() {
   async function fetchCenterEventRows(s: string, e: string) {
     const { data, error } = await supabase
       .from('support_center_calendar_events')
-      .select('id,title,category,start_date,end_date,description')
-      .lte('start_date', e)
-      .gte('end_date', s)
+      .select('id,title,category,start_date,end_date,description,recurs_annually,birthday_calendar_type,birthday_is_intercalation')
       .order('start_date', { ascending: true });
 
     if (error) {
@@ -411,7 +468,25 @@ export default function Page() {
     }
 
     setCenterCalendarUnavailable(false);
-    setCenterEvents((data ?? []) as CenterEventRow[]);
+    const year = Number(s.slice(0, 4));
+    const visibleRows = ((data ?? []) as CenterEventRow[]).flatMap((row) => {
+      if (!row.recurs_annually) {
+        return rangesOverlap(row.start_date, row.end_date, s, e) ? [row] : [];
+      }
+
+      const recurringDates = buildRecurringCenterEventDates(year, row);
+      if (!recurringDates) return [];
+
+      const recurringRow: CenterEventRow = {
+        ...row,
+        start_date: recurringDates.start,
+        end_date: recurringDates.end,
+      };
+
+      return rangesOverlap(recurringRow.start_date, recurringRow.end_date, s, e) ? [recurringRow] : [];
+    });
+
+    setCenterEvents(visibleRows);
   }
 
   async function fetchCalendarData(s: string, e: string) {
@@ -632,6 +707,9 @@ export default function Page() {
     setCenterEventStart(dateStr);
     setCenterEventEnd(dateStr);
     setCenterEventDescription('');
+    setCenterEventRepeatsAnnually(false);
+    setBirthdayCalendarType('solar');
+    setBirthdayIsIntercalation(false);
     setCenterEventOpen(true);
   }
 
@@ -666,7 +744,7 @@ export default function Page() {
 
   function centerEventDaysPreview() {
     if (!centerEventStart || !centerEventEnd) return 0;
-    return weekdaysBetween(centerEventStart, centerEventEnd);
+    return daysBetweenInclusive(centerEventStart, centerEventEnd);
   }
 
   function reqDaysPreview() {
@@ -785,18 +863,13 @@ export default function Page() {
       return;
     }
 
-    if (!centerEventStart || !centerEventEnd) {
+    if (!centerEventStart || (centerEventCategory !== 'birthday' && !centerEventEnd)) {
       alert('일정 날짜를 입력해 주세요.');
       return;
     }
 
-    if (centerEventEnd < centerEventStart) {
+    if (centerEventCategory !== 'birthday' && centerEventEnd < centerEventStart) {
       alert('종료일은 시작일보다 빠를 수 없습니다.');
-      return;
-    }
-
-    if (centerEventDaysPreview() <= 0) {
-      alert('주말만 포함된 일정은 현재 캘린더에서 보이지 않습니다. 평일이 포함되도록 날짜를 조정해 주세요.');
       return;
     }
 
@@ -806,8 +879,11 @@ export default function Page() {
       title: centerEventTitle.trim(),
       category: centerEventCategory,
       start_date: centerEventStart,
-      end_date: centerEventEnd,
+      end_date: centerEventCategory === 'birthday' ? centerEventStart : centerEventEnd,
       description: centerEventDescription.trim() || null,
+      recurs_annually: centerEventCategory === 'birthday' ? true : centerEventRepeatsAnnually,
+      birthday_calendar_type: centerEventCategory === 'birthday' ? birthdayCalendarType : 'solar',
+      birthday_is_intercalation: centerEventCategory === 'birthday' ? birthdayIsIntercalation : false,
       created_by: me?.id ?? null,
     });
 
@@ -930,7 +1006,7 @@ ${txt}`);
         <div style={{ flex: 1, minWidth: 240 }}>
           <div style={{ fontSize: 22, fontWeight: 900, color: '#111827' }}>휴가관리 캘린더</div>
           <div style={{ fontSize: 14, fontWeight: 700, color: '#5f6368', marginTop: 6 }}>
-            휴가와 섭외센터 일정을 한 화면에 모아 보고, 주말은 숨긴 업무용 월간 캘린더입니다.
+            휴가와 섭외센터 일정을 한 화면에 모아 보고, 주말까지 포함해 확인하는 업무용 월간 캘린더입니다.
           </div>
         </div>
         <button
@@ -1139,7 +1215,7 @@ ${txt}`);
           initialView="dayGridMonth"
           height="auto"
           firstDay={1}
-          weekends={false}
+          weekends
           fixedWeekCount={false}
           dayMaxEventRows={3}
           moreLinkContent={(arg) => `+${arg.num}개 더보기`}
@@ -1743,7 +1819,17 @@ ${txt}`);
                     return (
                       <button
                         key={category}
-                        onClick={() => setCenterEventCategory(category)}
+                        onClick={() => {
+                          setCenterEventCategory(category);
+                          if (category === 'birthday') {
+                            setCenterEventRepeatsAnnually(true);
+                            if (centerEventStart) setCenterEventEnd(centerEventStart);
+                          } else if (centerEventCategory === 'birthday') {
+                            setCenterEventRepeatsAnnually(false);
+                            setBirthdayCalendarType('solar');
+                            setBirthdayIsIntercalation(false);
+                          }
+                        }}
                         style={{
                           height: 44,
                           padding: '0 14px',
@@ -1764,6 +1850,65 @@ ${txt}`);
                 </div>
               </div>
 
+              {centerEventCategory === 'birthday' && (
+                <div style={{ display: 'grid', gap: 10 }}>
+                  <div>
+                    <div style={{ fontSize: 15, fontWeight: 900, marginBottom: 6 }}>생일 기준</div>
+                    <div style={{ display: 'flex', gap: 8, flexDirection: isMobile ? 'column' : 'row' }}>
+                      {([
+                        { value: 'solar' as const, label: '양력 생일' },
+                        { value: 'lunar' as const, label: '음력 생일' },
+                      ]).map((item) => (
+                        <button
+                          key={item.value}
+                          onClick={() => {
+                            setBirthdayCalendarType(item.value);
+                            if (item.value === 'solar') setBirthdayIsIntercalation(false);
+                          }}
+                          style={{
+                            flex: 1,
+                            height: 44,
+                            borderRadius: 12,
+                            border: birthdayCalendarType === item.value ? '1px solid #7c3aed' : '1px solid #e5e7eb',
+                            background: birthdayCalendarType === item.value ? '#f3e8ff' : '#fff',
+                            color: birthdayCalendarType === item.value ? '#6d28d9' : '#111827',
+                            fontSize: 15,
+                            fontWeight: 900,
+                            cursor: 'pointer',
+                          }}
+                        >
+                          {item.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {birthdayCalendarType === 'lunar' && (
+                    <label
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 10,
+                        padding: '12px 14px',
+                        borderRadius: 12,
+                        border: '1px solid #e5e7eb',
+                        background: '#fff',
+                        fontSize: 15,
+                        fontWeight: 800,
+                        color: '#374151',
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={birthdayIsIntercalation}
+                        onChange={(e) => setBirthdayIsIntercalation(e.target.checked)}
+                      />
+                      윤달 생일입니다.
+                    </label>
+                  )}
+                </div>
+              )}
+
               <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
                 <div style={{ flex: 1, minWidth: 200 }}>
                   <div style={{ fontSize: 15, fontWeight: 900, marginBottom: 6 }}>시작일</div>
@@ -1773,6 +1918,10 @@ ${txt}`);
                     onChange={(e) => {
                       const value = e.target.value;
                       setCenterEventStart(value);
+                      if (centerEventCategory === 'birthday') {
+                        setCenterEventEnd(value);
+                        return;
+                      }
                       if (centerEventEnd < value) setCenterEventEnd(value);
                     }}
                     style={{
@@ -1791,6 +1940,7 @@ ${txt}`);
                   <input
                     type="date"
                     value={centerEventEnd}
+                    disabled={centerEventCategory === 'birthday'}
                     onChange={(e) => setCenterEventEnd(e.target.value)}
                     style={{
                       width: '100%',
@@ -1799,13 +1949,39 @@ ${txt}`);
                       border: '1px solid #e5e7eb',
                       padding: '0 12px',
                       fontSize: 16,
+                      background: centerEventCategory === 'birthday' ? '#f7f7f7' : '#fff',
                     }}
                   />
                 </div>
               </div>
 
+              <label
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 10,
+                  padding: '12px 14px',
+                  borderRadius: 12,
+                  border: '1px solid #e5e7eb',
+                  background: centerEventCategory === 'birthday' || centerEventRepeatsAnnually ? '#f8fafc' : '#fff',
+                  fontSize: 15,
+                  fontWeight: 800,
+                  color: '#374151',
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={centerEventCategory === 'birthday' ? true : centerEventRepeatsAnnually}
+                  onChange={(e) => setCenterEventRepeatsAnnually(e.target.checked)}
+                  disabled={centerEventCategory === 'birthday'}
+                />
+                {centerEventCategory === 'birthday'
+                  ? `생일은 매년 자동 반복됩니다. ${birthdayCalendarType === 'lunar' ? '음력을 해당 연도 양력 날짜로 변환해 보여줍니다.' : ''}`
+                  : '이 일정을 매년 반복 일정으로 저장'}
+              </label>
+
               <div style={{ fontSize: 16 }}>
-                표시되는 평일 수: <b style={{ fontSize: 18 }}>{centerEventDaysPreview()}</b>
+                표시 일수: <b style={{ fontSize: 18 }}>{centerEventDaysPreview()}</b>
               </div>
 
               <div>
@@ -1827,7 +2003,7 @@ ${txt}`);
               </div>
 
               <div style={{ fontSize: 13, color: '#6b7280', lineHeight: 1.6 }}>
-                주말은 달력 컬럼에서 숨김 처리되어 주말만 포함된 일정은 저장할 수 없습니다.
+                생일은 하루 일정으로 저장되며, 음력 생일은 보고 있는 연도의 양력 날짜로 자동 변환해 표시합니다.
               </div>
 
               <div style={{ display: 'flex', gap: 10, marginTop: 6, flexDirection: isMobile ? 'column' : 'row' }}>
@@ -1921,6 +2097,14 @@ ${txt}`);
                     <div style={{ marginTop: 4, fontSize: 16 }}>
                       일정: <b>{selected.data.start_date}</b> ~ <b>{selected.data.end_date}</b>
                     </div>
+                    <div style={{ marginTop: 4, fontSize: 16 }}>
+                      반복: <b>{selected.data.recurs_annually ? '매년 반복' : '한 번만 표시'}</b>
+                    </div>
+                    {selected.data.category === 'birthday' && (
+                      <div style={{ marginTop: 4, fontSize: 16 }}>
+                        기준: <b>{selected.data.birthday_calendar_type === 'lunar' ? `음력${selected.data.birthday_is_intercalation ? ' 윤달' : ''}` : '양력'}</b>
+                      </div>
+                    )}
                     {selected.data.description ? (
                       <div style={{ marginTop: 10, fontSize: 15, color: '#374151', lineHeight: 1.6 }}>메모: {selected.data.description}</div>
                     ) : (
@@ -2093,14 +2277,35 @@ ${txt}`);
           border: 1px solid #e8eaed;
         }
 
+        .hr-calendar-shell .fc .fc-scrollgrid-sync-table {
+          table-layout: fixed;
+        }
+
         .hr-calendar-shell .fc-theme-standard td,
         .hr-calendar-shell .fc-theme-standard th {
           border-color: #e8eaed;
         }
 
+        .hr-calendar-shell .fc-col-header-cell:nth-child(-n + 5),
+        .hr-calendar-shell .fc-daygrid-body .fc-daygrid-day:nth-child(-n + 5) {
+          width: 15.6%;
+        }
+
+        .hr-calendar-shell .fc-col-header-cell:nth-child(6),
+        .hr-calendar-shell .fc-col-header-cell:nth-child(7),
+        .hr-calendar-shell .fc-daygrid-body .fc-daygrid-day:nth-child(6),
+        .hr-calendar-shell .fc-daygrid-body .fc-daygrid-day:nth-child(7) {
+          width: 11%;
+        }
+
         .hr-calendar-shell .fc-col-header-cell {
           background: #f8fafc;
           padding: 8px 0;
+        }
+
+        .hr-calendar-shell .fc-col-header-cell.fc-day-sat,
+        .hr-calendar-shell .fc-col-header-cell.fc-day-sun {
+          background: linear-gradient(180deg, #f3f4f6 0%, #eef2f7 100%);
         }
 
         .hr-calendar-shell .fc-col-header-cell-cushion {
@@ -2114,9 +2319,22 @@ ${txt}`);
           background: #fff;
         }
 
+        .hr-calendar-shell .fc-daygrid-day.fc-day-sat,
+        .hr-calendar-shell .fc-daygrid-day.fc-day-sun {
+          background:
+            linear-gradient(180deg, rgba(148, 163, 184, 0.1) 0%, rgba(148, 163, 184, 0.04) 100%),
+            #f8fafc;
+        }
+
         .hr-calendar-shell .fc-daygrid-day-frame {
           min-height: 132px;
           padding: 6px;
+        }
+
+        .hr-calendar-shell .fc-daygrid-day.fc-day-sat .fc-daygrid-day-frame,
+        .hr-calendar-shell .fc-daygrid-day.fc-day-sun .fc-daygrid-day-frame {
+          padding-left: 4px;
+          padding-right: 4px;
         }
 
         .hr-calendar-shell .fc-daygrid-day-number {
@@ -2130,6 +2348,16 @@ ${txt}`);
           border-radius: 999px;
           background: #1a73e8;
           color: #fff;
+        }
+
+        .hr-calendar-shell .fc-day-sat .fc-daygrid-day-number,
+        .hr-calendar-shell .fc-col-header-cell.fc-day-sat .fc-col-header-cell-cushion {
+          color: #2563eb;
+        }
+
+        .hr-calendar-shell .fc-day-sun .fc-daygrid-day-number,
+        .hr-calendar-shell .fc-col-header-cell.fc-day-sun .fc-col-header-cell-cushion {
+          color: #dc2626;
         }
 
         .hr-calendar-shell .calendar-entry {
