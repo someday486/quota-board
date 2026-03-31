@@ -84,6 +84,91 @@ type LeaveRequestRow = {
   reason: string | null;
 };
 
+type CenterEventCategory = 'birthday' | 'award' | 'dinner' | 'meeting' | 'notice';
+
+type CenterEventRow = {
+  id: string;
+  title: string;
+  category: CenterEventCategory;
+  start_date: string;
+  end_date: string;
+  description: string | null;
+};
+
+type CalendarEntry =
+  | { kind: 'leave'; data: CalendarRow }
+  | { kind: 'center'; data: CenterEventRow };
+
+type EventTone = {
+  label: string;
+  dot: string;
+  background: string;
+  border: string;
+  text: string;
+};
+
+const leaveToneMap: Record<LeaveType, EventTone> = {
+  annual: {
+    label: '연차',
+    dot: '#0b57d0',
+    background: '#e8f0fe',
+    border: '#aecbfa',
+    text: '#0f3d91',
+  },
+  half_am: {
+    label: '오전반차',
+    dot: '#137333',
+    background: '#e6f4ea',
+    border: '#a8dab5',
+    text: '#0d652d',
+  },
+  half_pm: {
+    label: '오후반차',
+    dot: '#b06000',
+    background: '#fef7e0',
+    border: '#f7cb4d',
+    text: '#8a4b00',
+  },
+};
+
+const centerToneMap: Record<CenterEventCategory, EventTone> = {
+  birthday: {
+    label: '생일',
+    dot: '#a142f4',
+    background: '#f3e8ff',
+    border: '#d8b4fe',
+    text: '#7c3aed',
+  },
+  award: {
+    label: '우수섭외자 시상',
+    dot: '#c5221f',
+    background: '#fce8e6',
+    border: '#f28b82',
+    text: '#a50e0e',
+  },
+  dinner: {
+    label: '회식',
+    dot: '#e37400',
+    background: '#fef0dc',
+    border: '#fdc57a',
+    text: '#b06000',
+  },
+  meeting: {
+    label: '회의',
+    dot: '#1a73e8',
+    background: '#e8f0fe',
+    border: '#aecbfa',
+    text: '#185abc',
+  },
+  notice: {
+    label: '센터 일정',
+    dot: '#188038',
+    background: '#e6f4ea',
+    border: '#a8dab5',
+    text: '#137333',
+  },
+};
+
 // ---------- date utils (KST 밀림 방지) ----------
 function formatYMDLocal(d: Date) {
   const y = d.getFullYear();
@@ -124,6 +209,30 @@ function labelOf(t: LeaveType) {
   if (t === 'annual') return '연차';
   if (t === 'half_am') return '오전반차';
   return '오후반차';
+}
+
+function centerCategoryLabelOf(category: CenterEventCategory) {
+  return centerToneMap[category].label;
+}
+
+function toneOfLeave(type: LeaveType) {
+  return leaveToneMap[type];
+}
+
+function toneOfCenter(category: CenterEventCategory) {
+  return centerToneMap[category];
+}
+
+function selectedTitleOf(entry: CalendarEntry) {
+  if (entry.kind === 'leave') {
+    return `${entry.data.display_name} · ${labelOf(entry.data.leave_type)}`;
+  }
+
+  return entry.data.title;
+}
+
+function isMissingCenterCalendarTableError(error: { code?: string; message?: string }) {
+  return error.code === 'PGRST205' || error.code === '42P01' || error.message?.includes('support_center_calendar_events');
 }
 
 function ymRangeFor(date: Date) {
@@ -191,11 +300,16 @@ export default function Page() {
   const [monthStart, setMonthStart] = useState('');
   const [monthEnd, setMonthEnd] = useState('');
   const [rows, setRows] = useState<CalendarRow[]>([]);
+  const [centerEvents, setCenterEvents] = useState<CenterEventRow[]>([]);
+  const [showLeaveEvents, setShowLeaveEvents] = useState(true);
+  const [showCenterEvents, setShowCenterEvents] = useState(true);
+  const [calendarClickMode, setCalendarClickMode] = useState<'leave' | 'center'>('leave');
+  const [centerCalendarUnavailable, setCenterCalendarUnavailable] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  // detail modal (admin cancel only)
+  // detail modal / destructive action
   const [detailOpen, setDetailOpen] = useState(false);
-  const [selected, setSelected] = useState<CalendarRow | null>(null);
+  const [selected, setSelected] = useState<CalendarEntry | null>(null);
   const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false);
 
   // request modal
@@ -206,6 +320,15 @@ export default function Page() {
   const [reqReason, setReqReason] = useState('');
   const [reqSubmitting, setReqSubmitting] = useState(false);
   const [reqUserId, setReqUserId] = useState<string>('');
+
+  // center event modal
+  const [centerEventOpen, setCenterEventOpen] = useState(false);
+  const [centerEventTitle, setCenterEventTitle] = useState('');
+  const [centerEventCategory, setCenterEventCategory] = useState<CenterEventCategory>('notice');
+  const [centerEventStart, setCenterEventStart] = useState('');
+  const [centerEventEnd, setCenterEventEnd] = useState('');
+  const [centerEventDescription, setCenterEventDescription] = useState('');
+  const [centerEventSubmitting, setCenterEventSubmitting] = useState(false);
 
   // dashboard common
   const [myBalance, setMyBalance] = useState<MyBalance | null>(null);
@@ -246,8 +369,7 @@ export default function Page() {
   }, []);
 
   // -------- data fetchers --------
-  async function fetchMonth(s: string, e: string) {
-    setLoading(true);
+  async function fetchMonthLeaveRows(s: string, e: string) {
     let q = supabase
       .from('v_leave_calendar')
       .select('id,user_id,display_name,leave_type,start_date,end_date,days_count,status,reason')
@@ -260,15 +382,49 @@ export default function Page() {
     }
 
     const { data, error } = await q;
-    setLoading(false);
 
     if (error) {
       console.error(error);
-      alert('캘린더 데이터 조회 실패(콘솔 확인)');
-      return;
+      throw error;
     }
 
     setRows((data ?? []) as CalendarRow[]);
+  }
+
+  async function fetchCenterEventRows(s: string, e: string) {
+    const { data, error } = await supabase
+      .from('support_center_calendar_events')
+      .select('id,title,category,start_date,end_date,description')
+      .lte('start_date', e)
+      .gte('end_date', s)
+      .order('start_date', { ascending: true });
+
+    if (error) {
+      if (isMissingCenterCalendarTableError(error)) {
+        setCenterCalendarUnavailable(true);
+        setCenterEvents([]);
+        return;
+      }
+
+      console.error(error);
+      throw error;
+    }
+
+    setCenterCalendarUnavailable(false);
+    setCenterEvents((data ?? []) as CenterEventRow[]);
+  }
+
+  async function fetchCalendarData(s: string, e: string) {
+    setLoading(true);
+
+    try {
+      await Promise.all([fetchMonthLeaveRows(s, e), fetchCenterEventRows(s, e)]);
+    } catch {
+      alert('캘린더 데이터 조회 실패(콘솔 확인)');
+      return;
+    } finally {
+      setLoading(false);
+    }
   }
 
   async function fetchMyBalance() {
@@ -369,7 +525,7 @@ export default function Page() {
   }
 
   async function refreshAll() {
-    if (monthStart && monthEnd) await fetchMonth(monthStart, monthEnd);
+    if (monthStart && monthEnd) await fetchCalendarData(monthStart, monthEnd);
 
     // ✅ 관리자일 때는 "내 현황/내 리스트" 아예 안 불러와도 됨 (쿼리 낭비 방지)
     if (!isAdmin) {
@@ -393,6 +549,11 @@ export default function Page() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [me?.id, me?.role]);
 
+  useEffect(() => {
+    if (isAdmin) return;
+    setCalendarClickMode('leave');
+  }, [isAdmin]);
+
   // 관리자: 이번 주 자동 선택
   useEffect(() => {
     if (!isAdmin) return;
@@ -409,18 +570,80 @@ export default function Page() {
 
   // -------- FullCalendar events --------
   const events = useMemo(() => {
-    return rows.map((r) => ({
-      id: r.id,
-      title: `${r.display_name} ${labelOf(r.leave_type)}`,
-      start: r.start_date,
-      end: addOneDayLocal(r.end_date), // ✅ 하루 덜 보이는 문제 방지
-      allDay: true,
-      extendedProps: r,
-      classNames: ['ev-default'],
-    }));
-  }, [rows]);
+    const leaveEntries = showLeaveEvents
+      ? rows.map((r) => {
+          const tone = toneOfLeave(r.leave_type);
+          return {
+            id: `leave-${r.id}`,
+            title: `${r.display_name} · ${labelOf(r.leave_type)}`,
+            start: r.start_date,
+            end: addOneDayLocal(r.end_date),
+            allDay: true,
+            backgroundColor: tone.background,
+            borderColor: tone.border,
+            textColor: tone.text,
+            classNames: ['calendar-entry', 'calendar-entry--leave'],
+            extendedProps: {
+              kind: 'leave' as const,
+              data: r,
+              dotColor: tone.dot,
+              badgeLabel: tone.label,
+            },
+          };
+        })
+      : [];
+
+    const centerEntries = showCenterEvents
+      ? centerEvents.map((r) => {
+          const tone = toneOfCenter(r.category);
+          return {
+            id: `center-${r.id}`,
+            title: r.title,
+            start: r.start_date,
+            end: addOneDayLocal(r.end_date),
+            allDay: true,
+            backgroundColor: tone.background,
+            borderColor: tone.border,
+            textColor: tone.text,
+            classNames: ['calendar-entry', 'calendar-entry--center'],
+            extendedProps: {
+              kind: 'center' as const,
+              data: r,
+              dotColor: tone.dot,
+              badgeLabel: tone.label,
+            },
+          };
+        })
+      : [];
+
+    return [...centerEntries, ...leaveEntries];
+  }, [centerEvents, rows, showCenterEvents, showLeaveEvents]);
 
   // -------- request modal logic --------
+  function openCenterEventModal(dateStr = formatYMDLocal(new Date())) {
+    if (!isAdmin) return;
+    if (centerCalendarUnavailable) {
+      alert('센터 일정 테이블이 아직 준비되지 않았습니다. Supabase 마이그레이션을 먼저 적용해 주세요.');
+      return;
+    }
+
+    setCenterEventTitle('');
+    setCenterEventCategory('notice');
+    setCenterEventStart(dateStr);
+    setCenterEventEnd(dateStr);
+    setCenterEventDescription('');
+    setCenterEventOpen(true);
+  }
+
+  function handleDateClick(dateStr: string) {
+    if (isAdmin && calendarClickMode === 'center') {
+      openCenterEventModal(dateStr);
+      return;
+    }
+
+    openRequestModal(dateStr);
+  }
+
   function openRequestModal(dateStr: string) {
     if (isAdmin && adminUsers.length === 0) {
       alert('사용자 목록이 없어 휴가를 등록할 수 없습니다.');
@@ -439,6 +662,11 @@ export default function Page() {
       setReqUserId(meRow?.user_id ?? adminUsers[0]?.user_id ?? '');
     }
     setReqOpen(true);
+  }
+
+  function centerEventDaysPreview() {
+    if (!centerEventStart || !centerEventEnd) return 0;
+    return weekdaysBetween(centerEventStart, centerEventEnd);
   }
 
   function reqDaysPreview() {
@@ -544,14 +772,79 @@ export default function Page() {
     await refreshAll();
   }
 
-  // admin cancel only
-  async function doAdminCancel() {
-    if (!selected) return;
+  async function submitCenterEvent() {
+    if (!isAdmin) return;
 
-    const { error } = await supabase.rpc('cancel_leave', { p_request_id: selected.id });
+    if (centerCalendarUnavailable) {
+      alert('센터 일정 테이블이 아직 준비되지 않았습니다. Supabase 마이그레이션을 먼저 적용해 주세요.');
+      return;
+    }
+
+    if (!centerEventTitle.trim()) {
+      alert('일정 제목을 입력해 주세요.');
+      return;
+    }
+
+    if (!centerEventStart || !centerEventEnd) {
+      alert('일정 날짜를 입력해 주세요.');
+      return;
+    }
+
+    if (centerEventEnd < centerEventStart) {
+      alert('종료일은 시작일보다 빠를 수 없습니다.');
+      return;
+    }
+
+    if (centerEventDaysPreview() <= 0) {
+      alert('주말만 포함된 일정은 현재 캘린더에서 보이지 않습니다. 평일이 포함되도록 날짜를 조정해 주세요.');
+      return;
+    }
+
+    setCenterEventSubmitting(true);
+
+    const { error } = await supabase.from('support_center_calendar_events').insert({
+      title: centerEventTitle.trim(),
+      category: centerEventCategory,
+      start_date: centerEventStart,
+      end_date: centerEventEnd,
+      description: centerEventDescription.trim() || null,
+      created_by: me?.id ?? null,
+    });
+
+    setCenterEventSubmitting(false);
+
+    if (error) {
+      console.error(error);
+      alert(`센터 일정 등록 실패: ${error.message}`);
+      return;
+    }
+
+    setCenterEventOpen(false);
+    await refreshAll();
+  }
+
+  async function doAdminCancel() {
+    if (!selected || selected.kind !== 'leave') return;
+
+    const { error } = await supabase.rpc('cancel_leave', { p_request_id: selected.data.id });
     if (error) {
       console.error(error);
       alert(`취소 실패: ${error.message}`);
+      return;
+    }
+
+    setCancelConfirmOpen(false);
+    setDetailOpen(false);
+    await refreshAll();
+  }
+
+  async function deleteCenterEvent() {
+    if (!selected || selected.kind !== 'center') return;
+
+    const { error } = await supabase.from('support_center_calendar_events').delete().eq('id', selected.data.id);
+    if (error) {
+      console.error(error);
+      alert(`센터 일정 삭제 실패: ${error.message}`);
       return;
     }
 
@@ -574,13 +867,13 @@ export default function Page() {
 
   async function downloadWeeklyCsv() {
     if (!weekKey) {
-      alert('?????????????');
+      alert('주차를 먼저 선택해 주세요.');
       return;
     }
 
     const token = await getAccessToken();
     if (!token) {
-      alert('?????? ???????? (???????????)');
+      alert('로그인이 만료되었습니다. 다시 로그인해 주세요.');
       return;
     }
 
@@ -588,10 +881,10 @@ export default function Page() {
       headers: { authorization: `Bearer ${token}` },
     });
 
-    // ??????: Unauthorized??????? ?????/????? ???????? ??? ???
+    // 인증 오류가 나면 상태/응답 본문을 함께 보여 준다.
     if (!res.ok) {
       const txt = await res.text().catch(() => '');
-      alert(`?????? ??? (${res.status})
+      alert(`다운로드 실패 (${res.status})
 ${txt}`);
       return;
     }
@@ -618,12 +911,14 @@ ${txt}`);
     border: '1px solid #e5e7eb',
   } as const;
 
+  const monthWorkdays = monthStart && monthEnd ? weekdaysBetween(monthStart, monthEnd) : 0;
+
   return (
     <div style={{ padding: isMobile ? 12 : 16 }}>
       <header
         style={{
           ...card,
-          padding: '12px 14px',
+          padding: isMobile ? '14px 14px' : '16px 18px',
           display: 'flex',
           flexDirection: isMobile ? 'column' : 'row',
           alignItems: isMobile ? 'stretch' : 'center',
@@ -632,18 +927,21 @@ ${txt}`);
           flexWrap: 'wrap',
         }}
       >
-        <div style={{ fontSize: 14, fontWeight: 800, color: '#111827', flex: 1, minWidth: 240 }}>
-          휴가 캘린더 관리자님 날짜 클릭: 대상자 선택 후 휴가 등록 / 이벤트 클릭: 상세(취소 가능)
+        <div style={{ flex: 1, minWidth: 240 }}>
+          <div style={{ fontSize: 22, fontWeight: 900, color: '#111827' }}>휴가관리 캘린더</div>
+          <div style={{ fontSize: 14, fontWeight: 700, color: '#5f6368', marginTop: 6 }}>
+            휴가와 섭외센터 일정을 한 화면에 모아 보고, 주말은 숨긴 업무용 월간 캘린더입니다.
+          </div>
         </div>
         <button
           onClick={() => router.push(isAdmin ? '/admin' : '/leader')}
           style={{
-            height: 38,
-            padding: '0 14px',
-            borderRadius: 10,
-            border: '1px solid #111827',
+            height: 42,
+            padding: '0 16px',
+            borderRadius: 999,
+            border: '1px solid #d2d6dc',
             background: '#ffffff',
-            color: '#111827',
+            color: '#1f2937',
             fontSize: 14,
             fontWeight: 900,
             cursor: 'pointer',
@@ -657,37 +955,228 @@ ${txt}`);
       {loading && <div style={{ marginTop: 8, color: '#6b7280' }}>불러오는 중…</div>}
 
       {/* Calendar */}
-      <div style={{ marginTop: 12, ...card, padding: 12 }}>
+      <div className="hr-calendar-shell" style={{ marginTop: 12, ...card, padding: isMobile ? 12 : 18 }}>
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: isMobile ? 'column' : 'row',
+            justifyContent: 'space-between',
+            alignItems: isMobile ? 'stretch' : 'flex-start',
+            gap: 14,
+            marginBottom: 14,
+          }}
+        >
+          <div style={{ display: 'grid', gap: 10, flex: 1 }}>
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+              {[
+                { label: '휴가 일정', value: rows.length, color: leaveToneMap.annual.dot },
+                { label: '센터 일정', value: centerEvents.length, color: centerToneMap.notice.dot },
+                { label: '이번 달 평일', value: monthWorkdays, color: '#5f6368' },
+              ].map((item) => (
+                <div
+                  key={item.label}
+                  style={{
+                    minWidth: isMobile ? '100%' : 154,
+                    padding: '12px 14px',
+                    borderRadius: 16,
+                    border: '1px solid #e8eaed',
+                    background: '#f8fafc',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#5f6368', fontSize: 13, fontWeight: 800 }}>
+                    <span style={{ width: 10, height: 10, borderRadius: 999, background: item.color }} />
+                    {item.label}
+                  </div>
+                  <div style={{ marginTop: 8, fontSize: 24, lineHeight: 1, fontWeight: 900, color: '#111827' }}>{item.value}</div>
+                </div>
+              ))}
+            </div>
+
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <button
+                onClick={() => setShowLeaveEvents((prev) => !prev)}
+                style={{
+                  height: 38,
+                  padding: '0 14px',
+                  borderRadius: 999,
+                  border: `1px solid ${showLeaveEvents ? leaveToneMap.annual.border : '#d2d6dc'}`,
+                  background: showLeaveEvents ? leaveToneMap.annual.background : '#fff',
+                  color: showLeaveEvents ? leaveToneMap.annual.text : '#5f6368',
+                  fontWeight: 900,
+                  cursor: 'pointer',
+                }}
+              >
+                휴가 {showLeaveEvents ? '숨기기' : '보이기'}
+              </button>
+              <button
+                onClick={() => setShowCenterEvents((prev) => !prev)}
+                style={{
+                  height: 38,
+                  padding: '0 14px',
+                  borderRadius: 999,
+                  border: `1px solid ${showCenterEvents ? centerToneMap.notice.border : '#d2d6dc'}`,
+                  background: showCenterEvents ? centerToneMap.notice.background : '#fff',
+                  color: showCenterEvents ? centerToneMap.notice.text : '#5f6368',
+                  fontWeight: 900,
+                  cursor: 'pointer',
+                }}
+              >
+                센터 일정 {showCenterEvents ? '숨기기' : '보이기'}
+              </button>
+            </div>
+          </div>
+
+          <div style={{ display: 'grid', gap: 10, minWidth: isMobile ? '100%' : 280 }}>
+            {isAdmin && (
+              <div
+                style={{
+                  padding: '12px 14px',
+                  borderRadius: 16,
+                  border: '1px solid #e8eaed',
+                  background: '#f8fafc',
+                }}
+              >
+                <div style={{ fontSize: 13, fontWeight: 900, color: '#5f6368', marginBottom: 8 }}>날짜 클릭 동작</div>
+                <div style={{ display: 'flex', gap: 8, flexDirection: isMobile ? 'column' : 'row' }}>
+                  {[
+                    { mode: 'leave' as const, label: '휴가 등록' },
+                    { mode: 'center' as const, label: '센터 일정 등록' },
+                  ].map((item) => (
+                    <button
+                      key={item.mode}
+                      onClick={() => setCalendarClickMode(item.mode)}
+                      style={{
+                        flex: 1,
+                        height: 40,
+                        borderRadius: 12,
+                        border: calendarClickMode === item.mode ? '1px solid #1a73e8' : '1px solid #d2d6dc',
+                        background: calendarClickMode === item.mode ? '#e8f0fe' : '#fff',
+                        color: calendarClickMode === item.mode ? '#185abc' : '#374151',
+                        fontWeight: 900,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div
+              style={{
+                padding: '12px 14px',
+                borderRadius: 16,
+                border: '1px solid #e8eaed',
+                background: '#fff',
+                display: 'grid',
+                gap: 8,
+              }}
+            >
+              <div style={{ fontSize: 13, fontWeight: 900, color: '#5f6368' }}>표시 범례</div>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                {[leaveToneMap.annual, centerToneMap.notice, centerToneMap.birthday, centerToneMap.dinner].map((tone) => (
+                  <div
+                    key={tone.label}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      padding: '8px 10px',
+                      borderRadius: 999,
+                      background: tone.background,
+                      border: `1px solid ${tone.border}`,
+                      color: tone.text,
+                      fontSize: 13,
+                      fontWeight: 800,
+                    }}
+                  >
+                    <span style={{ width: 8, height: 8, borderRadius: 999, background: tone.dot }} />
+                    {tone.label}
+                  </div>
+                ))}
+              </div>
+              {isAdmin && (
+                <button
+                  onClick={() => openCenterEventModal()}
+                  style={{
+                    height: 42,
+                    borderRadius: 12,
+                    border: '1px solid #d2d6dc',
+                    background: '#fff',
+                    color: '#1f2937',
+                    fontSize: 14,
+                    fontWeight: 900,
+                    cursor: 'pointer',
+                  }}
+                >
+                  센터 일정 직접 추가
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {centerCalendarUnavailable && (
+          <div
+            style={{
+              marginBottom: 14,
+              padding: '12px 14px',
+              borderRadius: 14,
+              border: '1px solid #fde68a',
+              background: '#fffbeb',
+              color: '#92400e',
+              fontSize: 14,
+              fontWeight: 700,
+            }}
+          >
+            센터 일정 테이블이 아직 연결되지 않아 휴가만 표시 중입니다. 추가한 마이그레이션을 적용하면 센터 일정도 바로 함께 보입니다.
+          </div>
+        )}
+
         <FullCalendar
           plugins={[dayGridPlugin, interactionPlugin]}
           initialView="dayGridMonth"
           height="auto"
           firstDay={1}
+          weekends={false}
+          fixedWeekCount={false}
+          dayMaxEventRows={3}
+          moreLinkContent={(arg) => `+${arg.num}개 더보기`}
           locale={koLocale}
-          titleFormat={{ year: 'numeric', month: 'long' }} // 2026년 2월
-          dayHeaderFormat={{ weekday: 'short' }} // 월/화/수/목/금/토/일
+          buttonText={{ today: '오늘' }}
+          headerToolbar={{
+            left: 'prev,next today',
+            center: 'title',
+            right: '',
+          }}
+          titleFormat={{ year: 'numeric', month: 'long' }}
+          dayHeaderFormat={{ weekday: 'short' }}
           events={events}
-          // ✅ 관리자일 때는 dateClick 자체를 무시 (신청 완전 차단)
           dateClick={(arg) => {
-            openRequestModal(arg.dateStr);
+            handleDateClick(arg.dateStr);
           }}
           eventClick={(info) => {
-            const row = info.event.extendedProps as CalendarRow;
-            setSelected(row);
+            const kind = info.event.extendedProps.kind as CalendarEntry['kind'];
+            const data = info.event.extendedProps.data as CalendarRow | CenterEventRow;
+            if (kind === 'leave') {
+              setSelected({ kind, data: data as CalendarRow });
+            } else {
+              setSelected({ kind, data: data as CenterEventRow });
+            }
             setDetailOpen(true);
           }}
+          eventContent={(info) => (
+            <div className="calendar-entry__inner">
+              <span className="calendar-entry__dot" style={{ background: String(info.event.extendedProps.dotColor ?? '#1a73e8') }} />
+              <span className="calendar-entry__text">{info.event.title}</span>
+            </div>
+          )}
           datesSet={(arg) => {
             const { start, end } = ymRangeFor(arg.view.currentStart);
             setMonthStart(start);
             setMonthEnd(end);
-            fetchMonth(start, end);
-          }}
-          dayCellDidMount={(arg) => {
-            const d = arg.date.getDay();
-            if (d === 0 || d === 6) {
-              arg.el.style.background = '#f4f4f4';
-              arg.el.style.opacity = '0.88';
-            }
+            fetchCalendarData(start, end);
           }}
         />
       </div>
@@ -955,7 +1444,7 @@ ${txt}`);
         )}
       </div>
 
-      {/* ===== 신청 모달 (관리자: 아예 안 뜨게) ===== */}
+      {/* ===== 휴가 신청 모달 ===== */}
       {reqOpen && (
         <div
           style={{
@@ -1178,7 +1667,213 @@ ${txt}`);
         </div>
       )}
 
-      {/* ===== 상세 모달 (관리자만 취소) ===== */}
+      {/* ===== 센터 일정 등록 모달 ===== */}
+      {centerEventOpen && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0,0,0,0.35)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 16,
+            zIndex: 9999,
+          }}
+          onClick={() => setCenterEventOpen(false)}
+        >
+          <div
+            style={{
+              width: 'min(560px, 100%)',
+              background: '#fff',
+              borderRadius: 16,
+              padding: 16,
+              boxShadow: '0 24px 60px rgba(0,0,0,0.22)',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexDirection: isMobile ? 'column' : 'row' }}>
+              <div>
+                <div style={{ fontSize: 20, fontWeight: 900 }}>센터 일정 등록</div>
+                <div style={{ marginTop: 6, fontSize: 14, color: '#6b7280' }}>생일, 시상, 회식, 회의 같은 내부 일정을 달력에 함께 표시합니다.</div>
+              </div>
+              <button
+                onClick={() => setCenterEventOpen(false)}
+                style={{
+                  width: 44,
+                  height: 44,
+                  borderRadius: 12,
+                  border: '1px solid #e5e7eb',
+                  background: '#fafafa',
+                  fontSize: 18,
+                  fontWeight: 900,
+                  cursor: 'pointer',
+                  alignSelf: isMobile ? 'flex-end' : 'auto',
+                }}
+                aria-label="닫기"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div style={{ marginTop: 14, display: 'grid', gap: 10 }}>
+              <div>
+                <div style={{ fontSize: 15, fontWeight: 900, marginBottom: 6 }}>제목</div>
+                <input
+                  value={centerEventTitle}
+                  onChange={(e) => setCenterEventTitle(e.target.value)}
+                  placeholder="예: 4월 우수섭외자 시상 / 민지님 생일 / 월말 회식"
+                  style={{
+                    width: '100%',
+                    height: 46,
+                    borderRadius: 12,
+                    border: '1px solid #e5e7eb',
+                    padding: '0 12px',
+                    fontSize: 16,
+                  }}
+                />
+              </div>
+
+              <div>
+                <div style={{ fontSize: 15, fontWeight: 900, marginBottom: 6 }}>카테고리</div>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', flexDirection: isMobile ? 'column' : 'row' }}>
+                  {(Object.keys(centerToneMap) as CenterEventCategory[]).map((category) => {
+                    const tone = toneOfCenter(category);
+                    const active = centerEventCategory === category;
+                    return (
+                      <button
+                        key={category}
+                        onClick={() => setCenterEventCategory(category)}
+                        style={{
+                          height: 44,
+                          padding: '0 14px',
+                          borderRadius: 12,
+                          border: `1px solid ${active ? tone.dot : '#e5e7eb'}`,
+                          background: active ? tone.background : '#fff',
+                          color: active ? tone.text : '#111827',
+                          fontSize: 15,
+                          fontWeight: 900,
+                          cursor: 'pointer',
+                          width: isMobile ? '100%' : 'auto',
+                        }}
+                      >
+                        {centerCategoryLabelOf(category)}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                <div style={{ flex: 1, minWidth: 200 }}>
+                  <div style={{ fontSize: 15, fontWeight: 900, marginBottom: 6 }}>시작일</div>
+                  <input
+                    type="date"
+                    value={centerEventStart}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      setCenterEventStart(value);
+                      if (centerEventEnd < value) setCenterEventEnd(value);
+                    }}
+                    style={{
+                      width: '100%',
+                      height: 46,
+                      borderRadius: 12,
+                      border: '1px solid #e5e7eb',
+                      padding: '0 12px',
+                      fontSize: 16,
+                    }}
+                  />
+                </div>
+
+                <div style={{ flex: 1, minWidth: 200 }}>
+                  <div style={{ fontSize: 15, fontWeight: 900, marginBottom: 6 }}>종료일</div>
+                  <input
+                    type="date"
+                    value={centerEventEnd}
+                    onChange={(e) => setCenterEventEnd(e.target.value)}
+                    style={{
+                      width: '100%',
+                      height: 46,
+                      borderRadius: 12,
+                      border: '1px solid #e5e7eb',
+                      padding: '0 12px',
+                      fontSize: 16,
+                    }}
+                  />
+                </div>
+              </div>
+
+              <div style={{ fontSize: 16 }}>
+                표시되는 평일 수: <b style={{ fontSize: 18 }}>{centerEventDaysPreview()}</b>
+              </div>
+
+              <div>
+                <div style={{ fontSize: 15, fontWeight: 900, marginBottom: 6 }}>메모(선택)</div>
+                <textarea
+                  value={centerEventDescription}
+                  onChange={(e) => setCenterEventDescription(e.target.value)}
+                  placeholder="장소, 준비물, 전달할 공지 등을 적어 두세요."
+                  style={{
+                    width: '100%',
+                    minHeight: 108,
+                    borderRadius: 12,
+                    border: '1px solid #e5e7eb',
+                    padding: '12px',
+                    fontSize: 15,
+                    resize: 'vertical',
+                  }}
+                />
+              </div>
+
+              <div style={{ fontSize: 13, color: '#6b7280', lineHeight: 1.6 }}>
+                주말은 달력 컬럼에서 숨김 처리되어 주말만 포함된 일정은 저장할 수 없습니다.
+              </div>
+
+              <div style={{ display: 'flex', gap: 10, marginTop: 6, flexDirection: isMobile ? 'column' : 'row' }}>
+                <button
+                  onClick={() => setCenterEventOpen(false)}
+                  style={{
+                    flex: 1,
+                    height: 48,
+                    borderRadius: 12,
+                    border: '1px solid #e5e7eb',
+                    background: '#fff',
+                    fontSize: 17,
+                    fontWeight: 900,
+                    cursor: 'pointer',
+                    width: isMobile ? '100%' : 'auto',
+                  }}
+                  disabled={centerEventSubmitting}
+                >
+                  닫기
+                </button>
+                <button
+                  onClick={submitCenterEvent}
+                  style={{
+                    flex: 2,
+                    height: 48,
+                    borderRadius: 12,
+                    border: '1px solid #1a73e8',
+                    background: '#1a73e8',
+                    color: '#fff',
+                    fontSize: 17,
+                    fontWeight: 900,
+                    cursor: 'pointer',
+                    opacity: centerEventSubmitting ? 0.65 : 1,
+                    width: isMobile ? '100%' : 'auto',
+                  }}
+                  disabled={centerEventSubmitting}
+                >
+                  {centerEventSubmitting ? '등록 중…' : '센터 일정 저장'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ===== 상세 모달 ===== */}
       {detailOpen && selected && (
         <div
           style={{
@@ -1205,18 +1900,34 @@ ${txt}`);
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexDirection: isMobile ? 'column' : 'row' }}>
               <div>
-                <div style={{ fontSize: 20, fontWeight: 900 }}>
-                  {selected.display_name} · {labelOf(selected.leave_type)}
-                </div>
-                <div style={{ marginTop: 8, fontSize: 16 }}>
-                  기간: <b>{selected.start_date}</b> ~ <b>{selected.end_date}</b>
-                </div>
-                <div style={{ marginTop: 4, fontSize: 16 }}>
-                  사용: <b>{selected.days_count}</b>일
-                </div>
-                {selected.reason ? (
-                  <div style={{ marginTop: 10, fontSize: 15, color: '#374151' }}>사유: {selected.reason}</div>
-                ) : null}
+                <div style={{ fontSize: 20, fontWeight: 900 }}>{selectedTitleOf(selected)}</div>
+                {selected.kind === 'leave' ? (
+                  <>
+                    <div style={{ marginTop: 8, fontSize: 16 }}>
+                      기간: <b>{selected.data.start_date}</b> ~ <b>{selected.data.end_date}</b>
+                    </div>
+                    <div style={{ marginTop: 4, fontSize: 16 }}>
+                      사용: <b>{selected.data.days_count}</b>일
+                    </div>
+                    {selected.data.reason ? (
+                      <div style={{ marginTop: 10, fontSize: 15, color: '#374151' }}>사유: {selected.data.reason}</div>
+                    ) : null}
+                  </>
+                ) : (
+                  <>
+                    <div style={{ marginTop: 8, fontSize: 16 }}>
+                      구분: <b>{centerCategoryLabelOf(selected.data.category)}</b>
+                    </div>
+                    <div style={{ marginTop: 4, fontSize: 16 }}>
+                      일정: <b>{selected.data.start_date}</b> ~ <b>{selected.data.end_date}</b>
+                    </div>
+                    {selected.data.description ? (
+                      <div style={{ marginTop: 10, fontSize: 15, color: '#374151', lineHeight: 1.6 }}>메모: {selected.data.description}</div>
+                    ) : (
+                      <div style={{ marginTop: 10, fontSize: 15, color: '#6b7280' }}>등록된 메모가 없습니다.</div>
+                    )}
+                  </>
+                )}
               </div>
 
               <button
@@ -1254,10 +1965,12 @@ ${txt}`);
                     cursor: 'pointer',
                   }}
                 >
-                  휴가 취소
+                  {selected.kind === 'leave' ? '휴가 취소' : '센터 일정 삭제'}
                 </button>
                 <div style={{ marginTop: 8, fontSize: 13, color: '#6b7280' }}>
-                  * 취소하면 캘린더/리스트/PDF에서 제외됩니다.
+                  {selected.kind === 'leave'
+                    ? '* 취소하면 캘린더/리스트/PDF에서 제외됩니다.'
+                    : '* 삭제하면 센터 일정 캘린더에서 바로 제외됩니다.'}
                 </div>
               </div>
             )}
@@ -1290,11 +2003,13 @@ ${txt}`);
             }}
             onClick={(e) => e.stopPropagation()}
           >
-            <div style={{ fontSize: 18, fontWeight: 900 }}>정말 취소할까요?</div>
+            <div style={{ fontSize: 18, fontWeight: 900 }}>{selected.kind === 'leave' ? '정말 취소할까요?' : '정말 삭제할까요?'}</div>
             <div style={{ marginTop: 10, fontSize: 15, lineHeight: 1.6, color: '#374151' }}>
-              <b>{selected.display_name}</b> · {labelOf(selected.leave_type)}
+              <b>{selectedTitleOf(selected)}</b>
               <br />
-              {selected.start_date} ~ {selected.end_date} (사용 {selected.days_count}일)
+              {selected.kind === 'leave'
+                ? `${selected.data.start_date} ~ ${selected.data.end_date} (사용 ${selected.data.days_count}일)`
+                : `${selected.data.start_date} ~ ${selected.data.end_date} (${centerCategoryLabelOf(selected.data.category)})`}
             </div>
 
             <div style={{ marginTop: 14, display: 'flex', gap: 10, flexDirection: isMobile ? 'column' : 'row' }}>
@@ -1315,7 +2030,7 @@ ${txt}`);
                 아니오
               </button>
               <button
-                onClick={doAdminCancel}
+                onClick={selected.kind === 'leave' ? doAdminCancel : deleteCenterEvent}
                 style={{
                   flex: 1,
                   height: 48,
@@ -1329,7 +2044,7 @@ ${txt}`);
                   width: isMobile ? '100%' : 'auto',
                 }}
               >
-                취소합니다
+                {selected.kind === 'leave' ? '취소합니다' : '삭제합니다'}
               </button>
             </div>
           </div>
@@ -1337,8 +2052,133 @@ ${txt}`);
       )}
 
       <style jsx global>{`
-        .ev-default {
-          opacity: 1;
+        .hr-calendar-shell .fc {
+          --fc-border-color: #e8eaed;
+          --fc-page-bg-color: #ffffff;
+          --fc-neutral-bg-color: #f8fafc;
+          --fc-list-event-hover-bg-color: #f8fafc;
+          --fc-button-bg-color: #ffffff;
+          --fc-button-border-color: #d2d6dc;
+          --fc-button-text-color: #1f2937;
+          --fc-button-hover-bg-color: #f3f4f6;
+          --fc-button-hover-border-color: #c7cdd4;
+          --fc-button-active-bg-color: #e8f0fe;
+          --fc-button-active-border-color: #aecbfa;
+          --fc-today-bg-color: #e8f0fe;
+        }
+
+        .hr-calendar-shell .fc-toolbar {
+          margin-bottom: 14px;
+          gap: 12px;
+          flex-wrap: wrap;
+        }
+
+        .hr-calendar-shell .fc-toolbar-title {
+          font-size: 1.45rem;
+          font-weight: 900;
+          color: #202124;
+        }
+
+        .hr-calendar-shell .fc-button {
+          height: 38px;
+          padding: 0 14px;
+          border-radius: 999px;
+          box-shadow: none;
+          font-weight: 800;
+        }
+
+        .hr-calendar-shell .fc .fc-scrollgrid {
+          border-radius: 20px;
+          overflow: hidden;
+          border: 1px solid #e8eaed;
+        }
+
+        .hr-calendar-shell .fc-theme-standard td,
+        .hr-calendar-shell .fc-theme-standard th {
+          border-color: #e8eaed;
+        }
+
+        .hr-calendar-shell .fc-col-header-cell {
+          background: #f8fafc;
+          padding: 8px 0;
+        }
+
+        .hr-calendar-shell .fc-col-header-cell-cushion {
+          color: #5f6368;
+          font-size: 0.9rem;
+          font-weight: 800;
+          text-decoration: none;
+        }
+
+        .hr-calendar-shell .fc-daygrid-day {
+          background: #fff;
+        }
+
+        .hr-calendar-shell .fc-daygrid-day-frame {
+          min-height: 132px;
+          padding: 6px;
+        }
+
+        .hr-calendar-shell .fc-daygrid-day-number {
+          color: #202124;
+          font-weight: 800;
+          padding: 6px 8px;
+          text-decoration: none;
+        }
+
+        .hr-calendar-shell .fc-day-today .fc-daygrid-day-number {
+          border-radius: 999px;
+          background: #1a73e8;
+          color: #fff;
+        }
+
+        .hr-calendar-shell .calendar-entry {
+          margin-top: 2px;
+          border-radius: 8px;
+          border-width: 1px;
+          font-weight: 800;
+        }
+
+        .hr-calendar-shell .calendar-entry:hover {
+          filter: brightness(0.98);
+        }
+
+        .hr-calendar-shell .calendar-entry__inner {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          min-width: 0;
+          padding: 3px 6px;
+        }
+
+        .hr-calendar-shell .calendar-entry__dot {
+          width: 8px;
+          height: 8px;
+          border-radius: 999px;
+          flex: 0 0 auto;
+        }
+
+        .hr-calendar-shell .calendar-entry__text {
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+
+        .hr-calendar-shell .fc-daygrid-more-link {
+          margin-top: 4px;
+          color: #1a73e8;
+          font-weight: 800;
+          text-decoration: none;
+        }
+
+        @media (max-width: 768px) {
+          .hr-calendar-shell .fc-toolbar-title {
+            font-size: 1.2rem;
+          }
+
+          .hr-calendar-shell .fc-daygrid-day-frame {
+            min-height: 104px;
+          }
         }
       `}</style>
     </div>
