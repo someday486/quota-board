@@ -25,6 +25,9 @@ type LiveApplyRow = {
   company_name: string;
   is_excluded: boolean;
   is_reserve: boolean;
+  reviewed: boolean;
+  reviewed_at: string | null;
+  reviewed_by: string | null;
 };
 
 type CallRecordingRow = {
@@ -116,8 +119,8 @@ export default function ApplyList({
 
   const displayedApplies = useMemo(() => {
     if (!showUnreviewedOnly) return filteredApplies;
-    return filteredApplies.filter((a) => !recordingsByAppId[a.id]?.reviewed);
-  }, [filteredApplies, recordingsByAppId, showUnreviewedOnly]);
+    return filteredApplies.filter((a) => !a.reviewed);
+  }, [filteredApplies, showUnreviewedOnly]);
 
   const handleDownloadExcel = async () => {
     if (displayedApplies.length === 0) return;
@@ -416,8 +419,7 @@ export default function ApplyList({
                     {/* ✅ 검수 완료 체크 */}
                     <td style={{ ...tdSmall, width: 90, textAlign: 'center' }}>
                       {(() => {
-                        const rec = recordingsByAppId[a.id];
-                        const checked = !!rec?.reviewed;
+                        const checked = !!a.reviewed;
 
                         return (
                           <label
@@ -425,14 +427,13 @@ export default function ApplyList({
                               display: 'inline-flex',
                               alignItems: 'center',
                               gap: 8,
-                              cursor: rec ? 'pointer' : 'not-allowed',
+                              cursor: 'pointer',
                               userSelect: 'none',
                             }}
                           >
                             <input
                               type="checkbox"
                               checked={checked}
-                              disabled={!rec}
                               onChange={(e) => handleToggleReviewed(a.id, e.target.checked)}
                             />
                             <span style={{ fontSize: 13, fontWeight: 900, color: checked ? '#166534' : '#64748b' }}>

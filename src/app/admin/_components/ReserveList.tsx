@@ -1,7 +1,7 @@
 'use client';
 
-import { dangerMiniBtn, tdSmall, thSmall } from '../styles';
 import { useIsMobile } from '@/hooks/useIsMobile';
+import { dangerMiniBtn, tdSmall, thSmall } from '../styles';
 
 type RegionRow = {
   id: string;
@@ -17,12 +17,16 @@ type LiveApplyRow = {
   company_name: string;
   is_excluded: boolean;
   is_reserve: boolean;
+  reviewed: boolean;
+  reviewed_at: string | null;
+  reviewed_by: string | null;
 };
 
 type ReserveListProps = {
   reserveApplies: LiveApplyRow[];
   regionsMap: Map<string, RegionRow>;
   promoteReserveApply: (row: LiveApplyRow) => void;
+  toggleExcludeApply: (row: LiveApplyRow) => void;
   deleteApply: (row: LiveApplyRow) => void;
   busyDelete: string | null;
   formatDateTime: (value?: string | null) => string;
@@ -32,6 +36,7 @@ export default function ReserveList({
   reserveApplies,
   regionsMap,
   promoteReserveApply,
+  toggleExcludeApply,
   deleteApply,
   busyDelete,
   formatDateTime,
@@ -40,32 +45,52 @@ export default function ReserveList({
 
   return (
     <div style={{ marginTop: 26 }}>
-      <div style={{ display: 'flex', alignItems: isMobile ? 'flex-start' : 'baseline', flexDirection: isMobile ? 'column' : 'row', justifyContent: 'space-between', gap: 12, marginBottom: 8 }}>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: isMobile ? 'flex-start' : 'baseline',
+          flexDirection: isMobile ? 'column' : 'row',
+          justifyContent: 'space-between',
+          gap: 12,
+          marginBottom: 8,
+        }}
+      >
         <h2 style={{ margin: 0 }}>예비 등록 목록</h2>
         <div style={{ fontSize: 12, color: '#64748b' }}>총 {reserveApplies.length}건</div>
       </div>
 
-      <div style={{ border: '1px solid #ddd', borderRadius: 10, overflowX: 'auto', overflowY: 'hidden', maxWidth: 1100, background: '#fff' }}>
-        <table style={{ width: '100%', minWidth: 760, borderCollapse: 'collapse', fontSize: isMobile ? 13 : 14 }}>
+      <div
+        style={{
+          border: '1px solid #ddd',
+          borderRadius: 10,
+          overflowX: 'auto',
+          overflowY: 'hidden',
+          maxWidth: 1100,
+          background: '#fff',
+        }}
+      >
+        <table style={{ width: '100%', minWidth: 840, borderCollapse: 'collapse', fontSize: isMobile ? 13 : 14 }}>
           <thead>
             <tr style={{ background: '#f6f7f9' }}>
               <th style={{ ...thSmall, width: 140 }}>시간</th>
-              <th style={{ ...thSmall, width: 70 }}>지점</th>
-              <th style={{ ...thSmall, width: 90 }}>리더</th>
+              <th style={{ ...thSmall, width: 70 }}>지역</th>
+              <th style={{ ...thSmall, width: 90 }}>팀장</th>
               <th style={thSmall}>기업명</th>
               <th style={{ ...thSmall, width: 70, textAlign: 'center' }}>등록</th>
+              <th style={{ ...thSmall, width: 70, textAlign: 'center' }}>제외</th>
               <th style={{ ...thSmall, width: 70, textAlign: 'center' }}>삭제</th>
             </tr>
           </thead>
           <tbody>
             {reserveApplies.map((a) => {
               const rn = regionsMap.get(a.region_id)?.region_name ?? a.region_id;
+
               return (
-                <tr key={a.id} style={{ borderTop: '1px solid #eee' }}>
+                <tr key={a.id} style={{ borderTop: '1px solid #eee', background: a.is_excluded ? '#f8fafc' : '#ffffff' }}>
                   <td style={{ ...tdSmall, width: 140, whiteSpace: 'nowrap' }}>{formatDateTime(a.created_at)}</td>
                   <td style={{ ...tdSmall, width: 70, whiteSpace: 'nowrap' }}>{rn}</td>
                   <td style={{ ...tdSmall, width: 90, whiteSpace: 'nowrap', fontWeight: 900 }}>{a.leader_name}</td>
-                  <td style={{ ...tdSmall }}>
+                  <td style={tdSmall}>
                     <span
                       style={{
                         display: 'inline-flex',
@@ -113,6 +138,29 @@ export default function ReserveList({
                       등록
                     </button>
                   </td>
+
+                  <td style={{ ...tdSmall, width: 70, textAlign: 'center' }}>
+                    <button
+                      onClick={() => toggleExcludeApply(a)}
+                      style={{
+                        height: 32,
+                        padding: '0 10px',
+                        minWidth: 54,
+                        borderRadius: 10,
+                        border: a.is_excluded ? '1px solid #0f172a' : '1px solid #475569',
+                        background: a.is_excluded ? '#0f172a' : '#ffffff',
+                        color: a.is_excluded ? '#ffffff' : '#0f172a',
+                        fontWeight: 900,
+                        cursor: 'pointer',
+                        opacity: busyDelete ? 0.6 : 1,
+                      }}
+                      disabled={!!busyDelete}
+                      title={a.is_excluded ? '현재 제외 상태(클릭하면 해제)' : '클릭하면 제외 처리'}
+                    >
+                      {a.is_excluded ? '해제' : '제외'}
+                    </button>
+                  </td>
+
                   <td style={{ ...tdSmall, width: 70, textAlign: 'center' }}>
                     <button onClick={() => deleteApply(a)} style={dangerMiniBtn} disabled={busyDelete === a.id}>
                       {busyDelete === a.id ? '삭제중..' : '삭제'}
@@ -124,7 +172,7 @@ export default function ReserveList({
 
             {reserveApplies.length === 0 && (
               <tr>
-                <td colSpan={6} style={{ padding: 12, color: '#666', textAlign: 'center' }}>
+                <td colSpan={7} style={{ padding: 12, color: '#666', textAlign: 'center' }}>
                   예비 등록 내역이 없습니다.
                 </td>
               </tr>

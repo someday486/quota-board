@@ -41,6 +41,9 @@ type LiveApplyRow = {
   company_name: string;
   is_excluded: boolean;
   is_reserve: boolean;
+  reviewed: boolean;
+  reviewed_at: string | null;
+  reviewed_by: string | null;
 };
 
 type SupportLogPayload = {
@@ -110,6 +113,9 @@ type ApplicationLiveDbRow = {
   company_name: string | null;
   is_excluded: boolean | null;
   is_reserve: boolean | null;
+  reviewed: boolean | null;
+  reviewed_at: string | null;
+  reviewed_by: string | null;
 };
 
 type AppSettingsIntRow = {
@@ -367,7 +373,7 @@ const loadRecordings = async (appIds: string[]) => {
     // applications_live에는 region_name이 없으니, regionsMap으로 표시
     const { data, error } = await supabase
       .from('applications_live')
-      .select('id, created_at, region_id, leader_name, company_name, is_excluded, is_reserve')
+      .select('id, created_at, region_id, leader_name, company_name, is_excluded, is_reserve, reviewed, reviewed_at, reviewed_by')
       .order('created_at', { ascending: false })
       .limit(500);
 
@@ -385,6 +391,9 @@ const loadRecordings = async (appIds: string[]) => {
       company_name: String(x.company_name ?? ''),
       is_excluded: Boolean(x.is_excluded),
       is_reserve: Boolean(x.is_reserve),
+      reviewed: Boolean(x.reviewed),
+      reviewed_at: x.reviewed_at ?? null,
+      reviewed_by: x.reviewed_by ?? null,
     }));
     const normals = listAll.filter((x) => !x.is_reserve);
     const reserves = listAll.filter((x) => x.is_reserve);
@@ -531,27 +540,23 @@ const handleDeleteRecording = async (applicationId: string) => {
 };
 
 const handleToggleReviewed = async (applicationId: string, checked: boolean) => {
-  const rec = recordingsByAppId[applicationId];
-  if (!rec) {
-    alert('먼저 녹취 파일을 업로드해주세요.');
-    return;
-  }
-
   const payload = checked
     ? { reviewed: true, reviewed_at: new Date().toISOString(), reviewed_by: adminUserId }
     : { reviewed: false, reviewed_at: null, reviewed_by: null };
 
-  const { error } = await supabase.from('call_recordings').update(payload).eq('id', rec.id);
+  const { error } = await supabase.from('applications_live').update(payload).eq('id', applicationId);
 
   if (error) {
     alert(`검수 상태 저장 실패: ${error.message}`);
     return;
   }
 
-  setRecordingsByAppId((p) => ({
-    ...p,
-    [applicationId]: { ...rec, ...payload } as CallRecordingRow,
-  }));
+  setApplies((prev) =>
+    prev.map((item) => (item.id === applicationId ? { ...item, ...payload } : item))
+  );
+  setReserveApplies((prev) =>
+    prev.map((item) => (item.id === applicationId ? { ...item, ...payload } : item))
+  );
 
   pushToast('success', checked ? '검수 완료로 표시했습니다.' : '검수 완료 표시를 해제했습니다.');
 };
@@ -703,11 +708,13 @@ const handleToggleReviewed = async (applicationId: string, checked: boolean) => 
 
     // UI 즉시 반응(optimistic)
     setApplies((prev) => prev.map((x) => (x.id === row.id ? ({ ...x, is_excluded: next } as LiveApplyRow) : x)));
+    setReserveApplies((prev) => prev.map((x) => (x.id === row.id ? ({ ...x, is_excluded: next } as LiveApplyRow) : x)));
 
     const { error } = await supabase.from('applications_live').update({ is_excluded: next }).eq('id', row.id);
     if (error) {
       // ??
       setApplies((prev) => prev.map((x) => (x.id === row.id ? ({ ...x, is_excluded: row.is_excluded } as LiveApplyRow) : x)));
+      setReserveApplies((prev) => prev.map((x) => (x.id === row.id ? ({ ...x, is_excluded: row.is_excluded } as LiveApplyRow) : x)));
       setErrorMsg(`?? ?? ??: ${error.message}`);
       return;
     }
@@ -726,7 +733,7 @@ const handleToggleReviewed = async (applicationId: string, checked: boolean) => 
     });
 
     pushToast('success', next ? '?? ?? ??' : '?? ?? ??');
-    if (next) {
+    if (next && !row.is_reserve) {
       let promoted = false;
       const { data: reservePick, error: reservePickErr } = await supabase
         .from('applications_live')
@@ -759,6 +766,21 @@ const handleToggleReviewed = async (applicationId: string, checked: boolean) => 
     await loadStatus();
   };
 
+  const bumpRegionCapacity = async (regionId: string) => {
+    const status = regionsStatus.find((item) => item.region_id === regionId);
+    const nextTotal = Math.max(0, Number(status?.capacity_total ?? totalByRegionId[regionId] ?? 0)) + 1;
+
+    const { error } = await supabase
+      .from('region_totals')
+      .upsert({ region_id: regionId, capacity_total: nextTotal }, { onConflict: 'region_id' });
+
+    if (error) {
+      throw new Error(`한도 자동 증가 실패: ${error.message}`);
+    }
+
+    await loadStatus();
+  };
+
   const promoteReserveApply = async (row: LiveApplyRow) => {
     pushToast('info', '');
     if (busyDelete) return; // 삭제/리셋 등 대형 작업 중에는 막기
@@ -777,6 +799,17 @@ const handleToggleReviewed = async (applicationId: string, checked: boolean) => 
       ].join('')
     );
     if (!ok) return;
+
+    const status = regionsStatus.find((item) => item.region_id === row.region_id);
+    if (status && (status.is_closed || Number(status.capacity_remaining ?? 0) <= 0)) {
+      try {
+        await bumpRegionCapacity(row.region_id);
+        pushToast('info', `${rn} 한도를 1 늘린 뒤 등록을 진행했습니다.`);
+      } catch (e: unknown) {
+        setErrorMsg(e instanceof Error ? e.message : String(e));
+        return;
+      }
+    }
 
     const { error } = await supabase.rpc('promote_reserve', { p_application_id: row.id });
     if (error) {
@@ -2007,6 +2040,7 @@ const copyBoardAsImage = async () => {
         reserveApplies={reserveApplies}
         regionsMap={regionsMap}
         promoteReserveApply={promoteReserveApply}
+        toggleExcludeApply={toggleExcludeApply}
         deleteApply={deleteApply}
         busyDelete={busyDelete}
         formatDateTime={fmtDT}
