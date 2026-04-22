@@ -76,6 +76,11 @@ type BalanceRow = {
   remaining_days: number | null;
 };
 
+type LeaveUsageRow = {
+  user_id: string;
+  days_count: number | null;
+};
+
 type LeaveRequestRow = {
   id: string;
   leave_type: LeaveType;
@@ -99,6 +104,8 @@ type CenterEventRow = {
   birthday_calendar_type: BirthdayCalendarType;
   birthday_is_intercalation: boolean;
 };
+
+const ACTIVE_LEAVE_STATUSES: LeaveStatus[] = ['pending', 'approved'];
 
 type CalendarEntry =
   | { kind: 'leave'; data: CalendarRow }
@@ -297,6 +304,11 @@ function ymRangeFor(date: Date) {
   const start = formatYMDLocal(new Date(y, m, 1));
   const end = formatYMDLocal(new Date(y, m + 1, 0));
   return { start, end };
+}
+
+function yearRangeFor(date = new Date()) {
+  const y = date.getFullYear();
+  return { start: `${y}-01-01`, end: `${y}-12-31` };
 }
 
 // ISO week key (이번 주 자동 선택용)
@@ -502,6 +514,32 @@ export default function Page() {
     }
   }
 
+  async function fetchLeaveUsageThisYear(userIds?: string[]) {
+    if (userIds && userIds.length === 0) return new Map<string, number>();
+
+    const { start, end } = yearRangeFor();
+    let query = supabase
+      .from('leave_requests')
+      .select('user_id,days_count')
+      .gte('start_date', start)
+      .lte('start_date', end)
+      .in('status', ACTIVE_LEAVE_STATUSES);
+
+    if (userIds?.length) {
+      query = query.in('user_id', userIds);
+    }
+
+    const { data, error } = await query;
+    if (error) throw error;
+
+    const usage = new Map<string, number>();
+    for (const row of (data ?? []) as LeaveUsageRow[]) {
+      usage.set(row.user_id, (usage.get(row.user_id) ?? 0) + Number(row.days_count ?? 0));
+    }
+
+    return usage;
+  }
+
   async function fetchMyBalance() {
     const { data, error } = await supabase.from('v_my_leave_balance_this_year').select('*').single();
     if (error) {
@@ -509,11 +547,24 @@ export default function Page() {
       setMyBalance(null);
       return;
     }
+
     const balance = data as BalanceRow;
+    const earnedDays = Number(balance.earned_days ?? 0);
+    let usedDays = Number(balance.used_days ?? 0);
+
+    try {
+      if (me?.id) {
+        const usage = await fetchLeaveUsageThisYear([me.id]);
+        usedDays = usage.get(me.id) ?? 0;
+      }
+    } catch (usageError) {
+      console.error(usageError);
+    }
+
     setMyBalance({
-      earned_days: Number(balance.earned_days ?? 0),
-      used_days: Number(balance.used_days ?? 0),
-      remaining_days: Number(balance.remaining_days ?? 0),
+      earned_days: earnedDays,
+      used_days: usedDays,
+      remaining_days: earnedDays - usedDays,
     });
   }
 
@@ -527,7 +578,7 @@ export default function Page() {
       .select('id,leave_type,start_date,end_date,days_count,reason,status')
       .gte('start_date', start)
       .lte('start_date', end)
-      .neq('status', 'canceled')
+      .in('status', ACTIVE_LEAVE_STATUSES)
       .order('start_date', { ascending: false });
 
     if (error) {
@@ -560,7 +611,29 @@ export default function Page() {
       return;
     }
 
-    setAdminBalances((data ?? []) as AdminBalanceRow[]);
+    const balances = (data ?? []) as AdminBalanceRow[];
+
+    try {
+      const usage = await fetchLeaveUsageThisYear(balances.map((row) => row.user_id));
+      setAdminBalances(
+        balances.map((row) => {
+          const earnedDays = Number(row.earned_days ?? 0);
+          const usedDays = usage.get(row.user_id) ?? 0;
+
+          return {
+            ...row,
+            earned_days: earnedDays,
+            used_days: usedDays,
+            remaining_days: earnedDays - usedDays,
+          };
+        })
+      );
+      return;
+    } catch (usageError) {
+      console.error(usageError);
+    }
+
+    setAdminBalances(balances);
   }
 
   async function fetchAdminUsers() {
