@@ -692,11 +692,15 @@ export default function LeaderPage() {
             loadStatus();
           })
 
-          .on('postgres_changes', { event: '*', schema: 'public', table: 'applications_live' }, () => {
-            loadStatus();
-            loadMyApplies(uidRef!);
-            loadMyTodayCount(uidRef!);
-          })
+          .on(
+            'postgres_changes',
+            { event: '*', schema: 'public', table: 'applications_live', filter: `user_id=eq.${uidRef}` },
+            () => {
+              loadStatus();
+              loadMyApplies(uidRef!);
+              loadMyTodayCount(uidRef!);
+            },
+          )
 
           .on('postgres_changes', { event: '*', schema: 'public', table: 'regions' }, () => {
             loadRegions();
@@ -767,16 +771,12 @@ export default function LeaderPage() {
       // Realtime이 잠깐 죽어도 정합성 유지용 백업 폴링(30초)
       pollTimer = window.setInterval(() => {
         if (!alive) return;
-        loadLimit();
-        loadExempt();
-        loadActiveGroup();
         loadStatus();
         if (uidRef) {
           loadMyApplies(uidRef);
           loadMyTodayCount(uidRef);
-          loadMyProfile(uidRef);
         }
-      }, 30000);
+      }, 10 * 60 * 1000);
 
       setChecking(false);
 

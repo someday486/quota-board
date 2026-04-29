@@ -52,6 +52,9 @@ type ApplyListProps = {
   setApplyRegionFilter: (value: string) => void;
   applyQuery: string;
   setApplyQuery: (value: string) => void;
+  applyPage: number;
+  applyPageCount: number;
+  onApplyPageChange: (value: number) => void;
   onResetFilter: () => void;
   editingCompanyId: string | null;
   setEditingCompanyId: (value: string | null) => void;
@@ -88,6 +91,9 @@ export default function ApplyList({
   setApplyRegionFilter,
   applyQuery,
   setApplyQuery,
+  applyPage,
+  applyPageCount,
+  onApplyPageChange,
   onResetFilter,
   editingCompanyId,
   setEditingCompanyId,
@@ -195,7 +201,7 @@ export default function ApplyList({
         <div style={{ display: 'flex', alignItems: isMobile ? 'flex-start' : 'baseline', flexDirection: isMobile ? 'column' : 'row', gap: 6 }}>
           <div style={{ fontSize: 15, fontWeight: 900 }}>팀장 지원 목록</div>
           <div style={{ fontSize: 12, color: '#6b7280' }}>
-            총계 <b style={{ color: '#374151' }}>{totalApplies}</b>건 · 표시 <b style={{ color: '#374151' }}>{displayedApplies.length}</b>건
+            총계 <b style={{ color: '#374151' }}>{totalApplies}</b>건 · 페이지 <b style={{ color: '#374151' }}>{applyPage}</b>/<b style={{ color: '#374151' }}>{applyPageCount}</b> · 표시 <b style={{ color: '#374151' }}>{displayedApplies.length}</b>건
           </div>
         </div>
 
@@ -291,6 +297,43 @@ export default function ApplyList({
       </div>
 
       <div style={{ padding: 12 }}>
+        <div
+          style={{
+            marginBottom: 10,
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: isMobile ? 'stretch' : 'center',
+            flexDirection: isMobile ? 'column' : 'row',
+            gap: 8,
+          }}
+        >
+          <div style={{ fontSize: 12, color: '#64748b', fontWeight: 700 }}>
+            페이지 크기 100건
+          </div>
+          <div style={{ display: 'flex', gap: 8, width: isMobile ? '100%' : 'auto' }}>
+            <button
+              onClick={() => onApplyPageChange(Math.max(1, applyPage - 1))}
+              style={{ ...rowBtn, height: 32, padding: '0 10px', opacity: applyPage > 1 ? 1 : 0.6, width: isMobile ? '50%' : 'auto' }}
+              disabled={applyPage <= 1}
+            >
+              이전
+            </button>
+            <button
+              onClick={() => onApplyPageChange(Math.min(applyPageCount, applyPage + 1))}
+              style={{
+                ...rowBtn,
+                height: 32,
+                padding: '0 10px',
+                opacity: applyPage < applyPageCount ? 1 : 0.6,
+                width: isMobile ? '50%' : 'auto',
+              }}
+              disabled={applyPage >= applyPageCount}
+            >
+              다음
+            </button>
+          </div>
+        </div>
+
         <div style={{ maxHeight: 420, overflowY: 'auto', overflowX: 'auto', border: '1px solid #e5e7eb', borderRadius: 10 }}>
           <table
             style={{

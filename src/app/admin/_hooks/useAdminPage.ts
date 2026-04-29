@@ -60,6 +60,45 @@ export function useAdminPage({
     let retryTimer: number | null = null;
     let pollTimer: number | null = null;
     let onVis: (() => void) | null = null;
+    let liveRefreshTimer: number | null = null;
+    let needsRegions = false;
+    let needsStatus = false;
+    let needsApplies = false;
+    let needsTodayCounts = false;
+
+    const flushLiveRefresh = () => {
+      liveRefreshTimer = null;
+      const runRegions = needsRegions;
+      const runStatus = needsStatus;
+      const runApplies = needsApplies;
+      const runTodayCounts = needsTodayCounts;
+      needsRegions = false;
+      needsStatus = false;
+      needsApplies = false;
+      needsTodayCounts = false;
+
+      if (!alive) return;
+      if (runRegions) loadRegions();
+      if (runStatus) loadStatus();
+      if (runApplies) loadApplies();
+      if (runTodayCounts) loadTodayCounts();
+    };
+
+    const scheduleLiveRefresh = (options: {
+      regions?: boolean;
+      status?: boolean;
+      applies?: boolean;
+      todayCounts?: boolean;
+      delayMs?: number;
+    }) => {
+      needsRegions = needsRegions || Boolean(options.regions);
+      needsStatus = needsStatus || Boolean(options.status);
+      needsApplies = needsApplies || Boolean(options.applies);
+      needsTodayCounts = needsTodayCounts || Boolean(options.todayCounts);
+
+      if (liveRefreshTimer) window.clearTimeout(liveRefreshTimer);
+      liveRefreshTimer = window.setTimeout(flushLiveRefresh, options.delayMs ?? 300);
+    };
 
     const boot = async () => {
       const { data: userRes, error: userErr } = await supabase.auth.getUser();
@@ -117,19 +156,16 @@ export function useAdminPage({
         ch = supabase
           .channel(`admin-live-${Date.now()}`)
           .on('postgres_changes', { event: '*', schema: 'public', table: 'region_totals' }, () => {
-            loadStatus();
+            scheduleLiveRefresh({ status: true });
           })
           .on('postgres_changes', { event: '*', schema: 'public', table: 'applications_live' }, () => {
-            loadApplies();
-            loadStatus();
-            loadTodayCounts();
+            scheduleLiveRefresh({ applies: true, status: true, todayCounts: true });
           })
           .on('postgres_changes', { event: '*', schema: 'public', table: 'call_recordings' }, () => {
-            loadApplies();
+            scheduleLiveRefresh({ applies: true });
           })
           .on('postgres_changes', { event: '*', schema: 'public', table: 'regions' }, () => {
-            loadRegions();
-            loadStatus();
+            scheduleLiveRefresh({ regions: true, status: true });
           })
           .on(
             'postgres_changes',
@@ -192,7 +228,7 @@ export function useAdminPage({
         loadStatus();
         loadApplies();
         loadTodayCounts();
-      }, 30000);
+      }, 5 * 60 * 1000);
 
       setChecking(false);
     };
@@ -204,6 +240,7 @@ export function useAdminPage({
       if (ch) supabase.removeChannel(ch);
       if (retryTimer) window.clearTimeout(retryTimer);
       if (pollTimer) window.clearInterval(pollTimer);
+      if (liveRefreshTimer) window.clearTimeout(liveRefreshTimer);
       if (onVis) document.removeEventListener('visibilitychange', onVis);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps

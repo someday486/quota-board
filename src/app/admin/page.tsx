@@ -141,6 +141,7 @@ type SupabaseErrorLike = {
 };
 
 type ClipboardItemConstructor = new (items: Record<string, Blob>) => ClipboardItem;
+const APPLY_PAGE_SIZE = 100;
 const fmtDT = (v?: string | null) => {
   if (!v) return '';
   const d = new Date(v);
@@ -283,9 +284,15 @@ export default function AdminPage() {
   const [totalByRegionId, setTotalByRegionId] = useState<Record<string, number>>({});
   const [busySave, setBusySave] = useState<string | null>(null);
   const [busyReset, setBusyReset] = useState(false);
+  const [applyPage, setApplyPage] = useState(1);
+  const [totalApplyCount, setTotalApplyCount] = useState(0);
+  const didInitApplyPagingRef = useRef(false);
+  const applyPageRef = useRef(1);
+  const applyRegionFilterRef = useRef('');
 
   // 지원 목록
   const [applies, setApplies] = useState<LiveApplyRow[]>([]);
+  const [boardApplies, setBoardApplies] = useState<LiveApplyRow[]>([]);
   // 예비 등록 목록(별도 표시)
   const [reserveApplies, setReserveApplies] = useState<LiveApplyRow[]>([]);
   const [busyDelete, setBusyDelete] = useState<string | null>(null);
@@ -293,6 +300,10 @@ export default function AdminPage() {
   const totalAppliedCount = useMemo(
     () => regionsStatus.reduce((sum, row) => sum + Number(row.applied_count ?? 0), 0),
     [regionsStatus],
+  );
+  const applyPageCount = useMemo(
+    () => Math.max(1, Math.ceil(totalApplyCount / APPLY_PAGE_SIZE)),
+    [totalApplyCount],
   );
 
   const loadRegions = async () => {
@@ -343,6 +354,8 @@ const loadRecordings = async (appIds: string[]) => {
   // appIds가 일부만 넘어와도 기존 맵을 날리지 않고, 해당 id들만 갱신합니다.
   if (!appIds || appIds.length === 0) {
     setRecordingsByAppId({});
+    setAudioUrlByAppId({});
+    setOpenPlayerAppId(null);
     return;
   }
 
@@ -357,6 +370,7 @@ const loadRecordings = async (appIds: string[]) => {
     return;
   }
 
+  const appIdSet = new Set(appIds);
   const map: Record<string, CallRecordingRow | null> = {};
   for (const id of appIds) map[id] = null;
 
@@ -364,26 +378,87 @@ const loadRecordings = async (appIds: string[]) => {
     map[r.application_id] = r;
   }
 
-  setRecordingsByAppId((prev) => ({ ...prev, ...map }));
+  setRecordingsByAppId(map);
+  setAudioUrlByAppId((prev) => {
+    const next: Record<string, string> = {};
+    for (const [applicationId, url] of Object.entries(prev)) {
+      if (appIdSet.has(applicationId)) next[applicationId] = url;
+    }
+    return next;
+  });
+  if (openPlayerAppId && !appIdSet.has(openPlayerAppId)) setOpenPlayerAppId(null);
 };
 
 
 
   const loadApplies = async () => {
     // applications_live에는 region_name이 없으니, regionsMap으로 표시
-    const { data, error } = await supabase
+    const page = Math.max(1, applyPageRef.current);
+    const from = (page - 1) * APPLY_PAGE_SIZE;
+    const to = from + APPLY_PAGE_SIZE - 1;
+
+    let appliesQuery = supabase
+      .from('applications_live')
+      .select(
+        'id, created_at, region_id, leader_name, company_name, is_excluded, is_reserve, reviewed, reviewed_at, reviewed_by',
+        { count: 'exact' },
+      )
+      .eq('is_reserve', false)
+      .order('created_at', { ascending: false })
+      .range(from, to);
+
+    if (applyRegionFilterRef.current) {
+      appliesQuery = appliesQuery.eq('region_id', applyRegionFilterRef.current);
+    }
+
+    const reserveQuery = supabase
       .from('applications_live')
       .select('id, created_at, region_id, leader_name, company_name, is_excluded, is_reserve, reviewed, reviewed_at, reviewed_by')
+      .eq('is_reserve', true)
       .order('created_at', { ascending: false })
-      .limit(500);
+      .limit(200);
+
+    const boardQuery = supabase
+      .from('applications_live')
+      .select('id, created_at, region_id, leader_name, company_name, is_excluded, is_reserve')
+      .eq('is_reserve', false)
+      .order('created_at', { ascending: false });
+
+    const [
+      { data, error, count },
+      { data: reserveData, error: reserveError },
+      { data: boardData, error: boardError },
+    ] = await Promise.all([
+      appliesQuery,
+      reserveQuery,
+      boardQuery,
+    ]);
 
     if (error) {
       setErrorMsg(error.message);
       return;
     }
 
-    const listRaw = (data as ApplicationLiveDbRow[]) ?? [];
-    const listAll: LiveApplyRow[] = listRaw.map((x) => ({
+    if (reserveError) {
+      setErrorMsg(reserveError.message);
+      return;
+    }
+
+    if (boardError) {
+      setErrorMsg(boardError.message);
+      return;
+    }
+
+    const total = Number(count ?? 0);
+    const maxPage = Math.max(1, Math.ceil(total / APPLY_PAGE_SIZE));
+    setTotalApplyCount(total);
+
+    if (page > maxPage) {
+      setApplyPage(maxPage);
+      return;
+    }
+
+    const normals: LiveApplyRow[] = ((data as ApplicationLiveDbRow[]) ?? []).map((x) => ({
       id: String(x.id),
       created_at: String(x.created_at),
       region_id: String(x.region_id),
@@ -395,9 +470,35 @@ const loadRecordings = async (appIds: string[]) => {
       reviewed_at: x.reviewed_at ?? null,
       reviewed_by: x.reviewed_by ?? null,
     }));
-    const normals = listAll.filter((x) => !x.is_reserve);
-    const reserves = listAll.filter((x) => x.is_reserve);
+
+    const reserves: LiveApplyRow[] = ((reserveData as ApplicationLiveDbRow[]) ?? []).map((x) => ({
+      id: String(x.id),
+      created_at: String(x.created_at),
+      region_id: String(x.region_id),
+      leader_name: String(x.leader_name ?? ''),
+      company_name: String(x.company_name ?? ''),
+      is_excluded: Boolean(x.is_excluded),
+      is_reserve: Boolean(x.is_reserve),
+      reviewed: Boolean(x.reviewed),
+      reviewed_at: x.reviewed_at ?? null,
+      reviewed_by: x.reviewed_by ?? null,
+    }));
+
+    const boardRows: LiveApplyRow[] = ((boardData as ApplicationLiveDbRow[]) ?? []).map((x) => ({
+      id: String(x.id),
+      created_at: String(x.created_at),
+      region_id: String(x.region_id),
+      leader_name: String(x.leader_name ?? ''),
+      company_name: String(x.company_name ?? ''),
+      is_excluded: Boolean(x.is_excluded),
+      is_reserve: Boolean(x.is_reserve),
+      reviewed: Boolean(x.reviewed),
+      reviewed_at: x.reviewed_at ?? null,
+      reviewed_by: x.reviewed_by ?? null,
+    }));
+
     setApplies(normals);
+    setBoardApplies(boardRows);
     setReserveApplies(reserves);
 
     // ✅ 녹취(부가 기능)는 정식 목록 기준으로만 로드
@@ -860,7 +961,7 @@ const handleToggleReviewed = async (applicationId: string, checked: boolean) => 
     pushToast('info', '');
     if (busySyncSheet) return;
 
-    if (applies.length === 0) {
+    if (totalApplyCount === 0) {
       pushToast('info', '동기화할 목록이 없습니다.');
       return;
     }
@@ -871,7 +972,23 @@ const handleToggleReviewed = async (applicationId: string, checked: boolean) => 
       return;
     }
 
-    const rows: SupportSyncRow[] = applies.map((a) => ({
+    let syncQuery = supabase
+      .from('applications_live')
+      .select('id, created_at, region_id, leader_name, company_name, is_excluded, is_reserve')
+      .eq('is_reserve', false)
+      .order('created_at', { ascending: false });
+
+    if (applyRegionFilter) {
+      syncQuery = syncQuery.eq('region_id', applyRegionFilter);
+    }
+
+    const { data: syncRows, error: syncRowsError } = await syncQuery;
+    if (syncRowsError) {
+      setErrorMsg(`?숆린?뷀븷 ?대낫??紐⑸줉 議고쉶 ?ㅽ뙣: ${syncRowsError.message}`);
+      return;
+    }
+
+    const rows: SupportSyncRow[] = ((syncRows as ApplicationLiveDbRow[]) ?? []).map((a) => ({
       applied_at: a.created_at,
       application_id: a.id,
       leader_name: a.leader_name ?? '',
@@ -1432,7 +1549,7 @@ const copyBoardAsImage = async () => {
   const boardByRegionId = useMemo(() => {
     // 보드는 “오래된 것 → 최신” 순으로 왼쪽부터 채워지는 게 캡쳐용으로 더 자연스러움
     // ✅ 제외(is_excluded=true)는 보드/지역 TO 집계에서 제외
-    const asc = applies
+    const asc = boardApplies
       .filter((x) => !x.is_excluded)
       .slice()
       .sort((a, b) => a.created_at.localeCompare(b.created_at));
@@ -1443,7 +1560,7 @@ const copyBoardAsImage = async () => {
       m.get(a.region_id)!.push(a);
     }
     return m;
-  }, [applies]);
+  }, [boardApplies]);
 
   const boardMaxCols = useMemo(() => {
     let mx = 0;
@@ -1519,6 +1636,29 @@ const copyBoardAsImage = async () => {
       );
     });
   }, [applies, applyQuery, applyRegionFilter, regionsMap]);
+
+  const handleApplyRegionFilterChange = (value: string) => {
+    setApplyRegionFilter(value);
+    setApplyPage(1);
+  };
+
+  useEffect(() => {
+    applyPageRef.current = applyPage;
+  }, [applyPage]);
+
+  useEffect(() => {
+    applyRegionFilterRef.current = applyRegionFilter;
+  }, [applyRegionFilter]);
+
+  useEffect(() => {
+    if (checking) return;
+    if (!didInitApplyPagingRef.current) {
+      didInitApplyPagingRef.current = true;
+      return;
+    }
+    void loadApplies();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [checking, applyPage, applyRegionFilter]);
 
   // 로그인 + role 체크 + 초기 로드 + realtime
   useAdminPage({
@@ -1999,16 +2139,19 @@ const copyBoardAsImage = async () => {
 
       <ApplyList
         filteredApplies={filteredApplies}
-        totalApplies={applies.length}
-        hasAnyApplies={applies.length > 0}
+        totalApplies={totalApplyCount}
+        hasAnyApplies={totalApplyCount > 0}
         regionsMap={regionsMap}
         applyRegionFilter={applyRegionFilter}
-        setApplyRegionFilter={setApplyRegionFilter}
+        setApplyRegionFilter={handleApplyRegionFilterChange}
         applyQuery={applyQuery}
         setApplyQuery={setApplyQuery}
+        applyPage={applyPage}
+        applyPageCount={applyPageCount}
+        onApplyPageChange={setApplyPage}
         onResetFilter={() => {
           setApplyQuery('');
-          setApplyRegionFilter('');
+          handleApplyRegionFilterChange('');
         }}
         editingCompanyId={editingCompanyId}
         setEditingCompanyId={setEditingCompanyId}
