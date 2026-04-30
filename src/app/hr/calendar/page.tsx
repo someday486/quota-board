@@ -392,6 +392,7 @@ export default function Page() {
   const [reqSubmitting, setReqSubmitting] = useState(false);
   const [reqUserId, setReqUserId] = useState<string>('');
   const [reqHolidayOverrides, setReqHolidayOverrides] = useState<HolidayOverrideRow[]>([]);
+  const [monthHolidayOverrides, setMonthHolidayOverrides] = useState<HolidayOverrideRow[]>([]);
 
   // center event modal
   const [centerEventOpen, setCenterEventOpen] = useState(false);
@@ -416,6 +417,18 @@ export default function Page() {
   const [weeklyRows, setWeeklyRows] = useState<WeeklyRow[]>([]);
   const [weekYear, setWeekYear] = useState<number>(new Date().getFullYear()); // 옵션 년도
   const weekOptions = useMemo(() => getISOWeekOptions(weekYear), [weekYear]);
+  const monthHolidayEntries = useMemo(
+    () => getHolidayEntriesBetween(monthStart, monthEnd, monthHolidayOverrides),
+    [monthEnd, monthHolidayOverrides, monthStart]
+  );
+  const monthHolidayDateSet = useMemo(
+    () => getHolidayDateSetBetween(monthStart, monthEnd, monthHolidayOverrides),
+    [monthEnd, monthHolidayOverrides, monthStart]
+  );
+  const monthHolidayNameMap = useMemo(
+    () => new Map(monthHolidayEntries.map((entry) => [entry.date, entry.name])),
+    [monthHolidayEntries]
+  );
   const reqHolidayEntries = useMemo(
     () => getHolidayEntriesBetween(reqStart, reqEnd, reqHolidayOverrides),
     [reqEnd, reqHolidayOverrides, reqStart]
@@ -513,11 +526,32 @@ export default function Page() {
     setCenterEvents(visibleRows);
   }
 
+  async function fetchMonthHolidayOverrides(s: string, e: string) {
+    const { data, error } = await supabase
+      .from('leave_holiday_overrides')
+      .select('holiday_date,name,is_holiday')
+      .gte('holiday_date', s)
+      .lte('holiday_date', e)
+      .order('holiday_date', { ascending: true });
+
+    if (error) {
+      if (isMissingHolidayOverridesTableError(error)) {
+        setMonthHolidayOverrides([]);
+        return;
+      }
+
+      console.error(error);
+      throw error;
+    }
+
+    setMonthHolidayOverrides((data ?? []) as HolidayOverrideRow[]);
+  }
+
   async function fetchCalendarData(s: string, e: string) {
     setLoading(true);
 
     try {
-      await Promise.all([fetchMonthLeaveRows(s, e), fetchCenterEventRows(s, e)]);
+      await Promise.all([fetchMonthLeaveRows(s, e), fetchCenterEventRows(s, e), fetchMonthHolidayOverrides(s, e)]);
     } catch {
       alert('캘린더 데이터 조회 실패(콘솔 확인)');
       return;
@@ -1200,7 +1234,7 @@ ${txt}`);
     border: '1px solid #e5e7eb',
   } as const;
 
-  const monthWorkdays = monthStart && monthEnd ? weekdaysBetween(monthStart, monthEnd) : 0;
+  const monthWorkdays = monthStart && monthEnd ? countBusinessLeaveDays(monthStart, monthEnd, monthHolidayDateSet) : 0;
 
   return (
     <div style={{ padding: isMobile ? 12 : 16 }}>
@@ -1442,6 +1476,16 @@ ${txt}`);
           titleFormat={{ year: 'numeric', month: 'long' }}
           dayHeaderFormat={{ weekday: 'short' }}
           events={events}
+          dayCellClassNames={(arg) => {
+            const ymd = formatYMDLocal(arg.date);
+            return monthHolidayDateSet.has(ymd) ? ['calendar-day--holiday'] : [];
+          }}
+          dayCellDidMount={(arg) => {
+            const ymd = formatYMDLocal(arg.date);
+            const holidayName = monthHolidayNameMap.get(ymd);
+            if (!holidayName) return;
+            arg.el.title = `${ymd} · ${holidayName}`;
+          }}
           dateClick={(arg) => {
             handleDateClick(arg.dateStr);
           }}
@@ -2539,6 +2583,12 @@ ${txt}`);
             #f8fafc;
         }
 
+        .hr-calendar-shell .fc-daygrid-day.calendar-day--holiday {
+          background:
+            linear-gradient(180deg, rgba(220, 38, 38, 0.12) 0%, rgba(220, 38, 38, 0.04) 100%),
+            #fff7f7;
+        }
+
         .hr-calendar-shell .fc-daygrid-day-frame {
           min-height: 132px;
           padding: 6px;
@@ -2548,6 +2598,10 @@ ${txt}`);
         .hr-calendar-shell .fc-daygrid-day.fc-day-sun .fc-daygrid-day-frame {
           padding-left: 4px;
           padding-right: 4px;
+        }
+
+        .hr-calendar-shell .fc-daygrid-day.calendar-day--holiday .fc-daygrid-day-frame {
+          box-shadow: inset 0 0 0 1px rgba(220, 38, 38, 0.08);
         }
 
         .hr-calendar-shell .fc-daygrid-day-number {
@@ -2571,6 +2625,10 @@ ${txt}`);
         .hr-calendar-shell .fc-day-sun .fc-daygrid-day-number,
         .hr-calendar-shell .fc-col-header-cell.fc-day-sun .fc-col-header-cell-cushion {
           color: #dc2626;
+        }
+
+        .hr-calendar-shell .calendar-day--holiday .fc-daygrid-day-number {
+          color: #b42318;
         }
 
         .hr-calendar-shell .calendar-entry {
