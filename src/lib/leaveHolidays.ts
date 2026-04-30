@@ -47,7 +47,13 @@ function isSaturday(dateStr: string) {
   return parseLocalDate(dateStr).getDay() === 6;
 }
 
-function pushOccurrence(list: HolidayOccurrence[], year: number, date: string, name: string, substituteRule: HolidayOccurrence['substituteRule']) {
+function pushOccurrence(
+  list: HolidayOccurrence[],
+  year: number,
+  date: string,
+  name: string,
+  substituteRule: HolidayOccurrence['substituteRule']
+) {
   if (date.startsWith(`${year}-`)) {
     list.push({ date, name, substituteRule });
   }
@@ -67,6 +73,7 @@ function buildOfficialHolidayOccurrences(year: number) {
 
   pushOccurrence(occurrences, year, `${year}-01-01`, '신정', 'none');
   pushOccurrence(occurrences, year, `${year}-03-01`, '삼일절', 'weekend_or_overlap');
+  pushOccurrence(occurrences, year, `${year}-05-01`, '노동절', 'none');
   pushOccurrence(occurrences, year, `${year}-05-05`, '어린이날', 'weekend_or_overlap');
   pushOccurrence(occurrences, year, `${year}-06-06`, '현충일', 'none');
   pushOccurrence(occurrences, year, `${year}-08-15`, '광복절', 'weekend_or_overlap');
