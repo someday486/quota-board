@@ -160,19 +160,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'An overlapping leave request already exists' }, { status: 409 });
     }
 
-    const leaveYear = Number(startDate.slice(0, 4));
-    const { data: remainingDays, error: remainingErr } = await auth.sbAdmin.rpc('remaining_days', {
-      p_uid: targetUserId,
-      p_year: leaveYear,
-    });
-
-    if (remainingErr) {
-      return NextResponse.json({ error: remainingErr.message }, { status: 500 });
-    }
-    if (Number(remainingDays ?? 0) < daysCount) {
-      return NextResponse.json({ error: 'Not enough remaining leave balance' }, { status: 400 });
-    }
-
     const { data: inserted, error: insertErr } = await auth.sbAdmin
       .from('leave_requests')
       .insert({
