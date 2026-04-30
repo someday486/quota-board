@@ -7,6 +7,14 @@ import koLocale from '@fullcalendar/core/locales/ko';
 import KoreanLunarCalendar from 'korean-lunar-calendar';
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import {
+  countBusinessLeaveDays,
+  formatYMDLocal,
+  getHolidayDateSetBetween,
+  getHolidayEntriesBetween,
+  isWeekend,
+  type HolidayOverrideRow,
+} from '@/lib/leaveHolidays';
 import { supabase } from '@/lib/supabase';
 import { useIsMobile } from '@/hooks/useIsMobile';
 
@@ -182,23 +190,10 @@ const centerToneMap: Record<CenterEventCategory, EventTone> = {
 };
 
 // ---------- date utils (KST 밀림 방지) ----------
-function formatYMDLocal(d: Date) {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
-}
-
 function addOneDayLocal(dateStr: string) {
   const d = new Date(dateStr + 'T00:00:00');
   d.setDate(d.getDate() + 1);
   return formatYMDLocal(d);
-}
-
-function isWeekend(dateStr: string) {
-  const d = new Date(dateStr + 'T00:00:00');
-  const day = d.getDay();
-  return day === 0 || day === 6;
 }
 
 // 평일만 카운트
@@ -259,6 +254,14 @@ function isMissingCenterCalendarTableError(error: { code?: string; message?: str
     error.message?.includes('recurs_annually') ||
     error.message?.includes('birthday_calendar_type') ||
     error.message?.includes('birthday_is_intercalation')
+  );
+}
+
+function isMissingHolidayOverridesTableError(error: { code?: string; message?: string }) {
+  return (
+    error.code === 'PGRST205' ||
+    error.code === '42P01' ||
+    error.message?.includes('leave_holiday_overrides')
   );
 }
 
@@ -388,6 +391,7 @@ export default function Page() {
   const [reqReason, setReqReason] = useState('');
   const [reqSubmitting, setReqSubmitting] = useState(false);
   const [reqUserId, setReqUserId] = useState<string>('');
+  const [reqHolidayOverrides, setReqHolidayOverrides] = useState<HolidayOverrideRow[]>([]);
 
   // center event modal
   const [centerEventOpen, setCenterEventOpen] = useState(false);
@@ -412,6 +416,14 @@ export default function Page() {
   const [weeklyRows, setWeeklyRows] = useState<WeeklyRow[]>([]);
   const [weekYear, setWeekYear] = useState<number>(new Date().getFullYear()); // 옵션 년도
   const weekOptions = useMemo(() => getISOWeekOptions(weekYear), [weekYear]);
+  const reqHolidayEntries = useMemo(
+    () => getHolidayEntriesBetween(reqStart, reqEnd, reqHolidayOverrides),
+    [reqEnd, reqHolidayOverrides, reqStart]
+  );
+  const reqHolidayDateSet = useMemo(
+    () => getHolidayDateSetBetween(reqStart, reqEnd, reqHolidayOverrides),
+    [reqEnd, reqHolidayOverrides, reqStart]
+  );
 
   // -------- auth/profile --------
   useEffect(() => {
@@ -716,6 +728,42 @@ export default function Page() {
     fetchWeeklyLeaves(weekKey);
   }, [isAdmin, weekKey]);
 
+  useEffect(() => {
+    if (!reqOpen || !reqStart || !reqEnd) {
+      setReqHolidayOverrides([]);
+      return;
+    }
+
+    let ignore = false;
+
+    (async () => {
+      const { data, error } = await supabase
+        .from('leave_holiday_overrides')
+        .select('holiday_date,name,is_holiday')
+        .gte('holiday_date', reqStart)
+        .lte('holiday_date', reqEnd)
+        .order('holiday_date', { ascending: true });
+
+      if (ignore) return;
+
+      if (error) {
+        if (isMissingHolidayOverridesTableError(error)) {
+          setReqHolidayOverrides([]);
+          return;
+        }
+        console.error(error);
+        setReqHolidayOverrides([]);
+        return;
+      }
+
+      setReqHolidayOverrides((data ?? []) as HolidayOverrideRow[]);
+    })();
+
+    return () => {
+      ignore = true;
+    };
+  }, [reqEnd, reqOpen, reqStart]);
+
   // -------- FullCalendar events --------
   const events = useMemo(() => {
     const leaveEntries = showLeaveEvents
@@ -796,6 +844,10 @@ export default function Page() {
   }
 
   function openRequestModal(dateStr: string) {
+    if (getHolidayDateSetBetween(dateStr, dateStr).has(dateStr)) {
+      alert('공휴일에는 휴가를 신청할 수 없습니다.');
+      return;
+    }
     if (isAdmin && adminUsers.length === 0) {
       alert('사용자 목록이 없어 휴가를 등록할 수 없습니다.');
       return;
@@ -822,11 +874,94 @@ export default function Page() {
 
   function reqDaysPreview() {
     if (!reqStart || !reqEnd) return 0;
-    if (reqType === 'half_am' || reqType === 'half_pm') return 0.5;
-    return weekdaysBetween(reqStart, reqEnd);
+    if (reqType === 'half_am' || reqType === 'half_pm') {
+      return isWeekend(reqStart) || reqHolidayDateSet.has(reqStart) ? 0 : 0.5;
+    }
+    return countBusinessLeaveDays(reqStart, reqEnd, reqHolidayDateSet);
+  }
+
+  async function getLeaveRequestAccessToken() {
+    const { data, error } = await supabase.auth.getSession();
+    if (error) throw error;
+    return data.session?.access_token ?? null;
+  }
+
+  async function submitLeaveRequest(targetUserId?: string) {
+    if (!reqStart || !reqEnd) {
+      alert('?좎쭨瑜??낅젰?섏꽭??');
+      return;
+    }
+
+    if (reqType !== 'annual') {
+      if (reqStart !== reqEnd) {
+        alert('諛섏감???섎（留??좏깮 媛?ν빀?덈떎.');
+        return;
+      }
+      if (isWeekend(reqStart)) {
+        alert('二쇰쭚?먮뒗 諛섏감 ?좎껌??遺덇??⑸땲??');
+        return;
+      }
+      if (reqHolidayDateSet.has(reqStart)) {
+        alert('공휴일에는 반차를 신청할 수 없습니다.');
+        return;
+      }
+    } else {
+      if (countBusinessLeaveDays(reqStart, reqEnd, reqHolidayDateSet) <= 0) {
+        if (reqHolidayEntries.length > 0) {
+          alert('선택한 기간이 주말/공휴일만 포함하고 있습니다.');
+        } else {
+          alert('?좏깮??湲곌컙???됱씪???놁뒿?덈떎.');
+        }
+        return;
+      }
+    }
+
+    try {
+      const token = await getLeaveRequestAccessToken();
+      if (!token) {
+        alert('로그인이 필요합니다.');
+        return;
+      }
+
+      setReqSubmitting(true);
+
+      const res = await fetch('/api/hr/leave-request', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          user_id: targetUserId,
+          leave_type: reqType,
+          start_date: reqStart,
+          end_date: reqEnd,
+          reason: reqReason || null,
+        }),
+      });
+      const payload = (await res.json().catch(() => null)) as { error?: string } | null;
+
+      if (!res.ok) {
+        alert(payload?.error ? `신청 실패: ${payload.error}` : '신청에 실패했습니다.');
+        return;
+      }
+    } catch (error) {
+      console.error(error);
+      alert('신청 처리 중 오류가 발생했습니다.');
+      return;
+    } finally {
+      setReqSubmitting(false);
+    }
+
+    setReqOpen(false);
+    await refreshAll();
   }
 
   async function submitAdminRequest() {
+    if (reqUserId) {
+      await submitLeaveRequest(reqUserId);
+      return;
+    }
     if (!reqUserId) {
       alert('대상 사용자를 선택해 주세요.');
       return;
@@ -878,6 +1013,11 @@ export default function Page() {
   async function submitRequest() {
     if (isAdmin) {
       await submitAdminRequest();
+      return;
+    }
+    const useApiRequest = reqHolidayDateSet instanceof Set;
+    if (useApiRequest) {
+      await submitLeaveRequest();
       return;
     }
 
