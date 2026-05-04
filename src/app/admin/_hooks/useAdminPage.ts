@@ -135,10 +135,18 @@ export function useAdminPage({
 
       setAdminName(p.display_name ?? '관리자');
 
-      await loadRegions();
       await Promise.all([
+        loadRegions(),
         loadStatus(),
         loadApplies(),
+      ]);
+
+      if (!alive) return;
+
+      setChecking(false);
+
+      // Backfill less-critical admin controls after the first screen is visible.
+      void Promise.allSettled([
         loadApplyLimit(),
         loadLeaders(),
         loadExemptUserIds(),
@@ -230,7 +238,6 @@ export function useAdminPage({
         loadTodayCounts();
       }, 5 * 60 * 1000);
 
-      setChecking(false);
     };
 
     boot();

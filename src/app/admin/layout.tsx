@@ -1,6 +1,5 @@
 import { ReactNode } from 'react';
 import type { Metadata } from "next";
-import AuthGate from '@/components/AuthGate';
 
 export const metadata: Metadata = {
   title: "관리자",
@@ -9,5 +8,5 @@ export const metadata: Metadata = {
 };
 
 export default function AdminLayout({ children }: { children: ReactNode }) {
-  return <AuthGate requiredRole="admin">{children}</AuthGate>;
+  return <>{children}</>;
 }
