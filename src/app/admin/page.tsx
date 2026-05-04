@@ -306,6 +306,11 @@ export default function AdminPage() {
     [totalApplyCount],
   );
 
+  const isTransientFetchFailure = (message: string) => {
+    const normalized = message.trim().toLowerCase();
+    return normalized.includes('failed to fetch') || normalized.includes('load failed');
+  };
+
   const loadRegions = async () => {
     const { data, error } = await supabase
       .from('regions')
@@ -1131,7 +1136,7 @@ const loadLeaders = async () => {
     setLeaders((data as ProfileRow[]) ?? []);
   };
 
-  const loadTodayCounts = async () => {
+  const loadTodayCounts = async (attempt = 0) => {
     // 오늘(로컬) 기준: applications_live에서 created_at이 오늘인 row만 집계
     const start = new Date();
     start.setHours(0, 0, 0, 0);
@@ -1145,6 +1150,16 @@ const loadLeaders = async () => {
       .lt('created_at', end.toISOString());
 
     if (error) {
+      if (isTransientFetchFailure(error.message)) {
+        if (attempt === 0) {
+          window.setTimeout(() => {
+            void loadTodayCounts(1);
+          }, 1200);
+        } else {
+          console.warn('[admin] loadTodayCounts transient fetch failure:', error.message);
+        }
+        return;
+      }
       setErrorMsg(`오늘 지원 집계 실패: ${error.message}`);
       return;
     }
