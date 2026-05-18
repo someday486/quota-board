@@ -83,6 +83,7 @@ function getLocalDayRangeISO() {
 
 type ToastType = 'success' | 'info';
 type ToastState = { type: ToastType; text: string } | null;
+type RowNotice = { type: 'success' | 'warning' | 'error'; text: string };
 type SupportLogPayload = {
   event_type: 'APPLY' | 'RESERVE_APPLY' | 'DELETE' | 'EXCEPTION_ON' | 'EXCEPTION_OFF';
   applied_at?: string | null;
@@ -108,10 +109,12 @@ export default function LeaderPage() {
   const [errorMsg, setErrorMsg] = useState('');
   const [toast, setToast] = useState<ToastState>(null);
   const toastTimerRef = useRef<number | null>(null);
+  const rowNoticeTimersRef = useRef<Record<string, number>>({});
 
   const [regionsMap, setRegionsMap] = useState<Map<string, RegionRow>>(new Map());
   const [statusRows, setStatusRows] = useState<RegionStatusRow[]>([]);
   const [companyByRegionId, setCompanyByRegionId] = useState<Record<string, string>>({});
+  const [rowNoticeByRegionId, setRowNoticeByRegionId] = useState<Record<string, RowNotice | undefined>>({});
   const [busyRegionId, setBusyRegionId] = useState<string | null>(null);
 
   const [myApplies, setMyApplies] = useState<MyApplyRow[]>([]);
@@ -183,6 +186,20 @@ export default function LeaderPage() {
   };
 
   const clearError = () => setErrorMsg('');
+
+  const showRowNotice = (regionId: string, notice: RowNotice) => {
+    setRowNoticeByRegionId((prev) => ({ ...prev, [regionId]: notice }));
+    const prevTimer = rowNoticeTimersRef.current[regionId];
+    if (prevTimer) window.clearTimeout(prevTimer);
+    rowNoticeTimersRef.current[regionId] = window.setTimeout(() => {
+      setRowNoticeByRegionId((prev) => {
+        const next = { ...prev };
+        delete next[regionId];
+        return next;
+      });
+      delete rowNoticeTimersRef.current[regionId];
+    }, 7000);
+  };
 
   const getAccessToken = async () => {
     const { data } = await supabase.auth.getSession();
@@ -433,25 +450,31 @@ export default function LeaderPage() {
     clearError();
     if (busyRegionId) return;
 
+    const c = (companyByRegionId[regionId] ?? '').trim();
+    const failWithCompany = (message: string) => {
+      const label = c ? `${c} 지원 실패` : '지원 실패';
+      showRowNotice(regionId, { type: 'error', text: `${label}: ${message}` });
+      setErrorMsg(message);
+    };
+
     if (restrictionBlocked) {
-      setErrorMsg(restrictionMessage || '참여 제한 중입니다.');
+      failWithCompany(restrictionMessage || '참여 제한 중입니다.');
       return;
     }
 
     const blocked = !isExempt && perPersonLimit > 0 && myTodayCount >= perPersonLimit;
     if (blocked) {
-      setErrorMsg('오늘 지원 가능 횟수가 0명입니다. (공통 1인당 하루 한도 도달)');
+      failWithCompany('오늘 지원 가능 횟수가 0명입니다. (공통 1인당 하루 한도 도달)');
       return;
     }
 
     if (groupBlocked) {
-      setErrorMsg(`오늘은 ${activeGroupLabel}만 지원 가능합니다. (내 소속: ${myGroupLabel})`);
+      failWithCompany(`오늘은 ${activeGroupLabel}만 지원 가능합니다. (내 소속: ${myGroupLabel})`);
       return;
     }
 
-    const c = (companyByRegionId[regionId] ?? '').trim();
     if (!c) {
-      setErrorMsg('기업명을 입력하세요.');
+      failWithCompany('기업명을 입력하세요.');
       return;
     }
 
@@ -463,7 +486,7 @@ export default function LeaderPage() {
     });
 
     if (error) {
-      setErrorMsg(error.message);
+      failWithCompany(error.message);
       setBusyRegionId(null);
       return;
     }
@@ -471,7 +494,8 @@ export default function LeaderPage() {
     const result = String(data);
 
     if (result === 'SUCCESS') {
-      showToast('success', '지원 완료');
+      showToast('success', `${c} 지원 성공`);
+      showRowNotice(regionId, { type: 'success', text: `${c} 지원 성공` });
       setCompanyByRegionId((prev) => ({ ...prev, [regionId]: '' }));
 
       let newApplicationId: string | null = null;
@@ -510,15 +534,17 @@ export default function LeaderPage() {
         await Promise.all([loadMyApplies(u.user.id), loadMyTodayCount(u.user.id)]);
       }
     } else if (result === 'CLOSED') {
-      setErrorMsg('마감되었습니다.');
+      const closedMessage = `${c} 지원 실패: 방금 마감되었습니다. 현재 현황을 다시 불러왔습니다.`;
+      showRowNotice(regionId, { type: 'warning', text: closedMessage });
+      setErrorMsg(closedMessage);
       await loadStatus();
     } else if (result === 'NO_NAME') {
-      setErrorMsg('프로필 이름이 없습니다. (profiles.display_name 확인)');
+      failWithCompany('프로필 이름이 없습니다. (profiles.display_name 확인)');
     } else if (result === 'NOT_LOGGED_IN') {
       router.replace('/login');
       return;
     } else {
-      setErrorMsg(`처리 결과: ${result}`);
+      failWithCompany(`처리 결과: ${result}`);
     }
 
     setBusyRegionId(null);
@@ -791,6 +817,8 @@ export default function LeaderPage() {
       if (pollTimer) window.clearInterval(pollTimer);
       if (onVis) document.removeEventListener('visibilitychange', onVis);
       if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
+      Object.values(rowNoticeTimersRef.current).forEach((timer) => window.clearTimeout(timer));
+      rowNoticeTimersRef.current = {};
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -1069,90 +1097,102 @@ export default function LeaderPage() {
                 const closed = r.is_closed || r.capacity_remaining <= 0 || r.capacity_total <= 0;
                 const isBusy = busyRegionId === r.region_id;
                 const disabled = closed || isBusy || limitBlocked || groupBlocked || restrictionBlocked;
+                const rowNotice = rowNoticeByRegionId[r.region_id];
                 if (r.capacity_total === 0) return null;
 
                 return (
-                  <tr key={r.region_id} style={{ borderTop: '1px solid #eef2f7' }}>
-                    <td style={{ ...tdBig, background: bg, fontWeight: 950, textAlign: 'center'  }}>{r.region_name}</td>
+                  <React.Fragment key={r.region_id}>
+                    <tr style={{ borderTop: '1px solid #eef2f7' }}>
+                      <td style={{ ...tdBig, background: bg, fontWeight: 950, textAlign: 'center'  }}>{r.region_name}</td>
 
-                    <td style={{ ...tdBig, textAlign: 'right', fontWeight: 900 }}>{r.capacity_total}</td>
+                      <td style={{ ...tdBig, textAlign: 'right', fontWeight: 900 }}>{r.capacity_total}</td>
 
-                    <td
-                      style={{
-                        ...td,
-                        textAlign: 'right',
-                        fontWeight: 950,
-                        fontSize: 22,
-                        color: closed ? '#b91c1c' : '#0f172a',
-                      }}
-                    >
-                      {r.capacity_remaining}
-                    </td>
-
-                    <td style={{ ...td, textAlign: 'center' }}>
-                      <span style={closed ? pillClosed : pillOpen}>{closed ? '마감' : '진행중'}</span>
-                    </td>
-
-                    <td style={td}>
-                      <input
-                        lang="ko"
-                        inputMode="text"
-                        autoComplete="off"
-                        autoCorrect="off"
-                        autoCapitalize="none"
-                        spellCheck={false}
-                        value={companyByRegionId[r.region_id] ?? ''}
-                        onChange={(e) =>
-                          setCompanyByRegionId((prev) => ({ ...prev, [r.region_id]: e.target.value }))
-                        }
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
-                            e.preventDefault();
-                            if (!disabled) apply(r.region_id);
-                          }
-                        }}
-                        placeholder={
-                          closed
-                            ? '마감'
-                            : groupBlocked
-                              ? `오늘은 ${activeGroupLabel}만 지원 가능`
-                              : limitBlocked
-                                ? '오늘 한도 도달'
-                                : '기업명 입력 (Enter 지원)'
-                        }
-                        disabled={disabled}
+                      <td
                         style={{
-                          width: '100%',
-                          maxWidth: 360,
-                          height: 38,
-                          padding: '0 10px',
-                          fontSize: 13,
-                          borderRadius: 10,
-                          border: '1px solid #d1d5db',
-                          background: disabled ? '#f8fafc' : '#fff',
-                          opacity: disabled ? 0.7 : 1,
-                        }}
-                      />
-                    </td>
-
-                    <td style={{ ...td, textAlign: 'center' }}>
-                      <button
-                        onClick={() => apply(r.region_id)}
-                        disabled={disabled}
-                        style={{
-                          ...btnPrimary,
-                          height: 38,
-                          minWidth: 88,
-                          background: disabled ? '#f8fafc' : '#111827',
-                          borderColor: disabled ? '#e5e7eb' : '#111827',
-                          color: disabled ? '#94a3b8' : '#fff',
-                          cursor: disabled ? 'not-allowed' : 'pointer',
+                          ...td,
+                          textAlign: 'right',
+                          fontWeight: 950,
+                          fontSize: 22,
+                          color: closed ? '#b91c1c' : '#0f172a',
                         }}
                       >
-                        {isBusy ? '처리중…' : restrictionBlocked ? '제한' : groupBlocked ? '불가' : limitBlocked ? '한도' : closed ? '마감' : '지원'}
-                      </button>
-                    </td>
-                  </tr>
+                        {r.capacity_remaining}
+                      </td>
+
+                      <td style={{ ...td, textAlign: 'center' }}>
+                        <span style={closed ? pillClosed : pillOpen}>{closed ? '마감' : '진행중'}</span>
+                      </td>
+
+                      <td style={td}>
+                        <input
+                          lang="ko"
+                          inputMode="text"
+                          autoComplete="off"
+                          autoCorrect="off"
+                          autoCapitalize="none"
+                          spellCheck={false}
+                          value={companyByRegionId[r.region_id] ?? ''}
+                          onChange={(e) =>
+                            setCompanyByRegionId((prev) => ({ ...prev, [r.region_id]: e.target.value }))
+                          }
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              if (!disabled) apply(r.region_id);
+                            }
+                          }}
+                          placeholder={
+                            closed
+                              ? '마감'
+                              : groupBlocked
+                                ? `오늘은 ${activeGroupLabel}만 지원 가능`
+                                : limitBlocked
+                                  ? '오늘 한도 도달'
+                                  : '기업명 입력 (Enter 지원)'
+                          }
+                          disabled={disabled}
+                          style={{
+                            width: '100%',
+                            maxWidth: 360,
+                            height: 38,
+                            padding: '0 10px',
+                            fontSize: 13,
+                            borderRadius: 10,
+                            border: '1px solid #d1d5db',
+                            background: disabled ? '#f8fafc' : '#fff',
+                            opacity: disabled ? 0.7 : 1,
+                          }}
+                        />
+                      </td>
+
+                      <td style={{ ...td, textAlign: 'center' }}>
+                        <button
+                          onClick={() => apply(r.region_id)}
+                          disabled={disabled}
+                          style={{
+                            ...btnPrimary,
+                            height: 38,
+                            minWidth: 88,
+                            background: disabled ? '#f8fafc' : '#111827',
+                            borderColor: disabled ? '#e5e7eb' : '#111827',
+                            color: disabled ? '#94a3b8' : '#fff',
+                            cursor: disabled ? 'not-allowed' : 'pointer',
+                          }}
+                        >
+                          {isBusy ? '처리중…' : restrictionBlocked ? '제한' : groupBlocked ? '불가' : limitBlocked ? '한도' : closed ? '마감' : '지원'}
+                        </button>
+                      </td>
+                    </tr>
+                    {rowNotice && (
+                      <tr>
+                        <td colSpan={6} style={tdNoticeWrap}>
+                          <div style={{ ...rowNoticeBox, ...rowNoticeTone[rowNotice.type] }}>
+                            {rowNotice.text}
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
                 );
               })}
 
@@ -1638,4 +1678,35 @@ const tdBig: React.CSSProperties = {
   ...td,
   padding: '14px 12px',
   fontSize: 20,
+};
+
+const tdNoticeWrap: React.CSSProperties = {
+  padding: '0 10px 10px',
+  background: '#fff',
+};
+
+const rowNoticeBox: React.CSSProperties = {
+  padding: '10px 12px',
+  borderRadius: 8,
+  border: '1px solid',
+  fontSize: 13,
+  fontWeight: 900,
+};
+
+const rowNoticeTone: Record<RowNotice['type'], React.CSSProperties> = {
+  success: {
+    background: '#f0fdf4',
+    borderColor: '#86efac',
+    color: '#166534',
+  },
+  warning: {
+    background: '#fff7ed',
+    borderColor: '#fdba74',
+    color: '#9a3412',
+  },
+  error: {
+    background: '#fff1f2',
+    borderColor: '#fda4af',
+    color: '#991b1b',
+  },
 };
