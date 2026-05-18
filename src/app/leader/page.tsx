@@ -1681,16 +1681,18 @@ const tdBig: React.CSSProperties = {
 };
 
 const tdNoticeWrap: React.CSSProperties = {
-  padding: '0 10px 10px',
+  padding: '0 10px 14px',
   background: '#fff',
 };
 
 const rowNoticeBox: React.CSSProperties = {
-  padding: '10px 12px',
+  padding: '14px 16px',
   borderRadius: 8,
-  border: '1px solid',
-  fontSize: 13,
-  fontWeight: 900,
+  border: '2px solid',
+  fontSize: 16,
+  fontWeight: 950,
+  lineHeight: 1.35,
+  boxShadow: '0 8px 20px rgba(15, 23, 42, 0.08)',
 };
 
 const rowNoticeTone: Record<RowNotice['type'], React.CSSProperties> = {
