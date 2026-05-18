@@ -30,7 +30,7 @@ with seed_birthdays (title, start_date, birthday_calendar_type, birthday_is_inte
     ('이수진님 생일', '1969-01-08'::date, 'solar', false, 'mega5664@megainfo.co.kr'),
     ('이영태님 생일', '1967-05-04'::date, 'solar', false, 'mega5548@megainfo.co.kr'),
     ('이현순님 생일', '1980-10-31'::date, 'solar', false, 'mega6047@megainfo.co.kr'),
-    ('이현주님 생일', '1982-02-10'::date, 'solar', false, 'mega3582@megainfo.co.kr'),
+    ('이현주님 생일', '1982-12-07'::date, 'solar', false, 'mega3582@megainfo.co.kr'),
     ('임현우님 생일', '1968-09-26'::date, 'solar', false, 'mega5026@megainfo.co.kr'),
     ('정호세님 생일', '1980-01-04'::date, 'solar', false, 'mega1323@megainfo.co.kr'),
     ('조난희님 생일', '1964-09-17'::date, 'solar', false, 'mega4207@megainfo.co.kr'),
