@@ -718,11 +718,15 @@ export default function LeaderPage() {
             loadStatus();
           })
 
+          // Everyone needs closed/open status to update when any live application changes.
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'applications_live' }, () => {
+            loadStatus();
+          })
+
           .on(
             'postgres_changes',
             { event: '*', schema: 'public', table: 'applications_live', filter: `user_id=eq.${uidRef}` },
             () => {
-              loadStatus();
               loadMyApplies(uidRef!);
               loadMyTodayCount(uidRef!);
             },
