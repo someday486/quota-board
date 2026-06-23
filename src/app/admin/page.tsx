@@ -9,6 +9,10 @@ import Toasts from './_components/Toasts';
 import ErrorAlert from './_components/ErrorAlert';
 import ApplyList from './_components/ApplyList';
 import ReserveList from './_components/ReserveList';
+import IntranetRegionalUnmatchedList, {
+  type RegionalUnmatchedMeta,
+  type RegionalUnmatchedRow,
+} from './_components/IntranetRegionalUnmatchedList';
 import QuotaBoard from './_components/QuotaBoard';
 import { useAdminPage } from './_hooks/useAdminPage';
 import { useIsMobile } from '@/hooks/useIsMobile';
@@ -311,6 +315,9 @@ export default function AdminPage() {
   const [busyDelete, setBusyDelete] = useState<string | null>(null);
   const [busyIntranetCheck, setBusyIntranetCheck] = useState(false);
   const [intranetStatusByAppId, setIntranetStatusByAppId] = useState<Record<string, IntranetCheckResult>>({});
+  const [busyRegionalUnmatchedCheck, setBusyRegionalUnmatchedCheck] = useState(false);
+  const [regionalUnmatchedRows, setRegionalUnmatchedRows] = useState<RegionalUnmatchedRow[]>([]);
+  const [regionalUnmatchedMeta, setRegionalUnmatchedMeta] = useState<RegionalUnmatchedMeta | null>(null);
   const totalAppliedCount = useMemo(
     () => regionsStatus.reduce((sum, row) => sum + Number(row.applied_count ?? 0), 0),
     [regionsStatus],
@@ -876,6 +883,58 @@ const handleToggleReviewed = async (applicationId: string, checked: boolean) => 
       '확인할 예비 등록 목록이 없습니다.',
       '예비 등록 인트라넷 확인 완료',
     );
+  };
+
+  const checkRegionalUnmatched = async () => {
+    pushToast('info', '');
+    if (busyRegionalUnmatchedCheck) return;
+
+    const token = await getAccessToken();
+    if (!token) {
+      setErrorMsg('인증 토큰을 확인할 수 없습니다. 다시 로그인해 주세요.');
+      return;
+    }
+
+    setBusyRegionalUnmatchedCheck(true);
+    try {
+      const res = await fetch('/api/intranet-regional-unmatched', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({}),
+      });
+      const json = (await res.json().catch(() => ({}))) as {
+        result?: boolean;
+        baseDate?: string;
+        targetDate?: string;
+        quotaCount?: number;
+        intranetRegionalCount?: number;
+        unmatchedCount?: number;
+        rows?: RegionalUnmatchedRow[];
+        error?: string;
+      };
+      if (!res.ok || json.result === false) {
+        throw new Error(json.error || '인트라넷 지방 누락 조회에 실패했습니다.');
+      }
+
+      const rows = Array.isArray(json.rows) ? json.rows : [];
+      setRegionalUnmatchedRows(rows);
+      setRegionalUnmatchedMeta({
+        baseDate: json.baseDate,
+        targetDate: json.targetDate,
+        quotaCount: json.quotaCount,
+        intranetRegionalCount: json.intranetRegionalCount,
+        unmatchedCount: json.unmatchedCount ?? rows.length,
+      });
+      pushToast('success', `지방 누락 조회 완료 (누락 ${json.unmatchedCount ?? rows.length}건)`);
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : '인트라넷 지방 누락 조회 중 오류가 발생했습니다.';
+      setErrorMsg(message);
+    } finally {
+      setBusyRegionalUnmatchedCheck(false);
+    }
   };
 
   const loadApplyLimit = async () => {
@@ -2015,6 +2074,13 @@ const copyBoardAsImage = async () => {
         onCheckIntranetRegistration={checkIntranetRegistration}
         busyIntranetCheck={busyIntranetCheck}
         formatDateTime={fmtDT}
+      />
+
+      <IntranetRegionalUnmatchedList
+        rows={regionalUnmatchedRows}
+        meta={regionalUnmatchedMeta}
+        busy={busyRegionalUnmatchedCheck}
+        onCheck={checkRegionalUnmatched}
       />
 
       <ReserveList
