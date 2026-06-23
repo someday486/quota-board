@@ -59,17 +59,6 @@ type SupportLogPayload = {
   note?: string | null;
 };
 
-type SupportSyncRow = {
-  applied_at: string;
-  application_id: string;
-  leader_name: string;
-  region_id: string;
-  region_name: string;
-  company_name: string;
-  is_reserve: boolean;
-  is_excluded: boolean;
-};
-
 type IntranetCheckStatus =
   | 'registered'
   | 'missing'
@@ -131,19 +120,6 @@ type LeaderDashRow = {
   leader_group: number | null;
 };
 
-type CallRecordingRow = {
-  id: string;
-  application_id: string;
-  file_path: string;
-  file_name: string | null;
-  content_type: string | null;
-  size_bytes: number | null;
-  uploaded_at: string;
-  reviewed: boolean;
-  reviewed_at: string | null;
-  reviewed_by: string | null;
-};
-
 type ApplicationLiveDbRow = {
   id: string;
   created_at: string;
@@ -174,6 +150,11 @@ type RecordingPathRow = {
   file_path: string | null;
 };
 
+type RecordingDeleteRow = {
+  id: string;
+  file_path: string | null;
+};
+
 type SupabaseErrorLike = {
   code?: string;
   message?: string;
@@ -200,14 +181,6 @@ export default function AdminPage() {
   const leftTOCardRef = useRef<HTMLDivElement | null>(null);
   const [leftTOCardHeight, setLeftTOCardHeight] = useState<number | null>(null);
   const [adminUserId, setAdminUserId] = useState<string>('');
-
-  // 녹취(업로드/재생/검수) - applications_live.id 기준 1:1
-  const [recordingsByAppId, setRecordingsByAppId] = useState<Record<string, CallRecordingRow | null>>({});
-  const [uploadingByAppId, setUploadingByAppId] = useState<Record<string, boolean>>({});
-  const [audioUrlByAppId, setAudioUrlByAppId] = useState<Record<string, string>>({});
-  const [dragOverAppId, setDragOverAppId] = useState<string | null>(null);
-  const [openPlayerAppId, setOpenPlayerAppId] = useState<string | null>(null);
-
 
   useEffect(() => {
     const el = leftTOCardRef.current;
@@ -335,7 +308,6 @@ export default function AdminPage() {
   // 예비 등록 목록(별도 표시)
   const [reserveApplies, setReserveApplies] = useState<LiveApplyRow[]>([]);
   const [busyDelete, setBusyDelete] = useState<string | null>(null);
-  const [busySyncSheet, setBusySyncSheet] = useState(false);
   const [busyIntranetCheck, setBusyIntranetCheck] = useState(false);
   const [intranetStatusByAppId, setIntranetStatusByAppId] = useState<Record<string, IntranetCheckResult>>({});
   const totalAppliedCount = useMemo(
@@ -394,48 +366,6 @@ export default function AdminPage() {
       return next;
     });
   };
-
-
-const loadRecordings = async (appIds: string[]) => {
-  // appIds가 일부만 넘어와도 기존 맵을 날리지 않고, 해당 id들만 갱신합니다.
-  if (!appIds || appIds.length === 0) {
-    setRecordingsByAppId({});
-    setAudioUrlByAppId({});
-    setOpenPlayerAppId(null);
-    return;
-  }
-
-  const { data, error } = await supabase
-    .from('call_recordings')
-    .select('id, application_id, file_path, file_name, content_type, size_bytes, uploaded_at, reviewed, reviewed_at, reviewed_by')
-    .in('application_id', appIds);
-
-  if (error) {
-    // 녹취는 “부가 기능”이라 치명 오류로 막지 말고 경고만
-    console.warn('[loadRecordings] error:', error.message);
-    return;
-  }
-
-  const appIdSet = new Set(appIds);
-  const map: Record<string, CallRecordingRow | null> = {};
-  for (const id of appIds) map[id] = null;
-
-  for (const r of (data as CallRecordingRow[]) ?? []) {
-    map[r.application_id] = r;
-  }
-
-  setRecordingsByAppId(map);
-  setAudioUrlByAppId((prev) => {
-    const next: Record<string, string> = {};
-    for (const [applicationId, url] of Object.entries(prev)) {
-      if (appIdSet.has(applicationId)) next[applicationId] = url;
-    }
-    return next;
-  });
-  if (openPlayerAppId && !appIdSet.has(openPlayerAppId)) setOpenPlayerAppId(null);
-};
-
-
 
   const loadApplies = async () => {
     // applications_live에는 region_name이 없으니, regionsMap으로 표시
@@ -546,145 +476,7 @@ const loadRecordings = async (appIds: string[]) => {
     setApplies(normals);
     setBoardApplies(boardRows);
     setReserveApplies(reserves);
-
-    // ✅ 녹취(부가 기능)는 정식 목록 기준으로만 로드
-    await loadRecordings(normals.map((x) => x.id));
   };
-
-
-const pickExt = (name: string) => {
-  const i = name.lastIndexOf('.');
-  if (i < 0) return '';
-  const ext = name.slice(i).toLowerCase();
-  if (!/^\.[a-z0-9]{1,8}$/.test(ext)) return '';
-  return ext;
-};
-
-const handleUploadRecording = async (applicationId: string, file: File) => {
-  if (!file) return;
-
-  // 너무 큰 파일 방지(현장 운영 기준: 200MB)
-  const maxMB = 200;
-  if (file.size > maxMB * 1024 * 1024) {
-    alert(`파일이 너무 큽니다. (${maxMB}MB 이하로 업로드해주세요)`);
-    return;
-  }
-
-  setUploadingByAppId((p) => ({ ...p, [applicationId]: true }));
-
-  try {
-    const ext = pickExt(file.name);
-    const path = `applications_live/${applicationId}/recording${ext || ''}`;
-
-    const up = await supabase.storage
-      .from('call_recordings')
-      .upload(path, file, { upsert: true, contentType: file.type });
-
-    if (up.error) {
-      alert(`업로드 실패: ${up.error.message}`);
-      return;
-    }
-
-    // 1지원(=applications_live 1건)당 1녹취: application_id UNIQUE로 upsert
-    const { error: upsertErr } = await supabase
-      .from('call_recordings')
-      .upsert(
-        {
-          application_id: applicationId,
-          file_path: path,
-          file_name: file.name,
-          content_type: file.type,
-          size_bytes: file.size,
-          reviewed: false,
-          reviewed_at: null,
-          reviewed_by: null,
-        },
-        { onConflict: 'application_id' },
-      );
-
-    if (upsertErr) {
-      alert(`DB 저장 실패: ${upsertErr.message}`);
-      return;
-    }
-
-    // 기존 재생 URL이 있으면 만료될 수 있으니 제거
-    setAudioUrlByAppId((p) => {
-      const next = { ...p };
-      delete next[applicationId];
-      return next;
-    });
-
-    await loadRecordings([applicationId]);
-    pushToast('success', '녹취 업로드 완료');
-  } finally {
-    setUploadingByAppId((p) => ({ ...p, [applicationId]: false }));
-  }
-};
-
-const handlePlayRecording = async (applicationId: string) => {
-  const rec = recordingsByAppId[applicationId];
-  if (!rec) return;
-
-  // 같은 항목에서 다시 누르면 접기
-  if (openPlayerAppId === applicationId) {
-    setOpenPlayerAppId(null);
-    return;
-  }
-
-  setOpenPlayerAppId(applicationId);
-
-  // 이미 signed url이 있으면 그대로 사용
-  if (audioUrlByAppId[applicationId]) return;
-
-  const { data, error } = await supabase.storage
-    .from('call_recordings')
-    .createSignedUrl(rec.file_path, 60 * 30); // 30분
-
-  if (error || !data?.signedUrl) {
-    alert(`재생 URL 생성 실패: ${error?.message ?? 'unknown'}`);
-    return;
-  }
-
-  setAudioUrlByAppId((p) => ({ ...p, [applicationId]: data.signedUrl }));
-};
-
-const handleDeleteRecording = async (applicationId: string) => {
-  const rec = recordingsByAppId[applicationId];
-  if (!rec) return;
-
-  const ok = confirm('이 지원 건의 녹취 파일을 삭제할까요? (되돌릴 수 없습니다)');
-  if (!ok) return;
-
-  try {
-    // 1) Storage 파일 삭제
-    const rm = await supabase.storage.from('call_recordings').remove([rec.file_path]);
-    if (rm.error) {
-      alert(`스토리지 삭제 실패: ${rm.error.message}`);
-      return;
-    }
-
-    // 2) DB row 삭제
-    const { error } = await supabase.from('call_recordings').delete().eq('id', rec.id);
-    if (error) {
-      alert(`DB 삭제 실패: ${error.message}`);
-      return;
-    }
-
-    // 로컬 상태 정리
-    setRecordingsByAppId((p) => ({ ...p, [applicationId]: null }));
-    setAudioUrlByAppId((p) => {
-      const next = { ...p };
-      delete next[applicationId];
-      return next;
-    });
-    if (openPlayerAppId === applicationId) setOpenPlayerAppId(null);
-
-    pushToast('success', '녹취 삭제 완료');
-  } catch (e: unknown) {
-    const message = e instanceof Error ? e.message : String(e);
-    alert(`삭제 중 오류: ${message}`);
-  }
-};
 
 const handleToggleReviewed = async (applicationId: string, checked: boolean) => {
   const payload = checked
@@ -786,21 +578,22 @@ const handleToggleReviewed = async (applicationId: string, checked: boolean) => 
 
     try {
       // ✅ 연결된 녹취가 있으면 같이 삭제(스토리지 → DB 순)
-      const rec = recordingsByAppId[row.id];
-      if (rec) {
-        const rm = await supabase.storage.from('call_recordings').remove([rec.file_path]);
+      const { data: recs, error: recLookupErr } = await supabase
+        .from('call_recordings')
+        .select('id, file_path')
+        .eq('application_id', row.id);
+      if (recLookupErr) throw new Error(`녹취 조회 실패: ${recLookupErr.message}`);
+
+      const recordingRows = (recs as RecordingDeleteRow[] | null) ?? [];
+      const recordingPaths = recordingRows.map((rec) => String(rec.file_path ?? '')).filter(Boolean);
+      const recordingIds = recordingRows.map((rec) => String(rec.id ?? '')).filter(Boolean);
+      if (recordingPaths.length > 0) {
+        const rm = await supabase.storage.from('call_recordings').remove(recordingPaths);
         if (rm.error) throw new Error(`녹취 스토리지 삭제 실패: ${rm.error.message}`);
-
-        const { error: recDelErr } = await supabase.from('call_recordings').delete().eq('id', rec.id);
+      }
+      if (recordingIds.length > 0) {
+        const { error: recDelErr } = await supabase.from('call_recordings').delete().in('id', recordingIds);
         if (recDelErr) throw new Error(`녹취 DB 삭제 실패: ${recDelErr.message}`);
-
-        setRecordingsByAppId((p) => ({ ...p, [row.id]: null }));
-        setAudioUrlByAppId((p) => {
-          const next = { ...p };
-          delete next[row.id];
-          return next;
-        });
-        if (openPlayerAppId === row.id) setOpenPlayerAppId(null);
       }
 
       // ✅ 지원 row 삭제
@@ -1001,79 +794,6 @@ const handleToggleReviewed = async (applicationId: string, checked: boolean) => 
     setBusyUpdateCompanyId(null);
 
     await loadApplies(); // 화면 즉시 반영
-  };
-
-  const syncSupportListToSheet = async () => {
-    pushToast('info', '');
-    if (busySyncSheet) return;
-
-    if (totalApplyCount === 0) {
-      pushToast('info', '동기화할 목록이 없습니다.');
-      return;
-    }
-
-    const token = await getAccessToken();
-    if (!token) {
-      setErrorMsg('인증 토큰을 확인할 수 없습니다. 다시 로그인해 주세요.');
-      return;
-    }
-
-    let syncQuery = supabase
-      .from('applications_live')
-      .select('id, created_at, region_id, leader_name, company_name, is_excluded, is_reserve')
-      .eq('is_reserve', false)
-      .order('created_at', { ascending: false });
-
-    if (applyRegionFilter) {
-      syncQuery = syncQuery.eq('region_id', applyRegionFilter);
-    }
-
-    const { data: syncRows, error: syncRowsError } = await syncQuery;
-    if (syncRowsError) {
-      setErrorMsg(`?숆린?뷀븷 ?대낫??紐⑸줉 議고쉶 ?ㅽ뙣: ${syncRowsError.message}`);
-      return;
-    }
-
-    const rows: SupportSyncRow[] = ((syncRows as ApplicationLiveDbRow[]) ?? []).map((a) => ({
-      applied_at: a.created_at,
-      application_id: a.id,
-      leader_name: a.leader_name ?? '',
-      region_id: a.region_id ?? '',
-      region_name: regionsMap.get(a.region_id)?.region_name ?? a.region_id,
-      company_name: a.company_name ?? '',
-      is_reserve: Boolean(a.is_reserve),
-      is_excluded: Boolean(a.is_excluded),
-    }));
-
-    setBusySyncSheet(true);
-    try {
-      const res = await fetch('/api/support-log/sync', {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ rows }),
-      });
-
-      const json = (await res.json().catch(() => null)) as
-        | { appended?: number; updated?: number; skipped?: number; error?: string }
-        | null;
-
-      if (!res.ok) {
-        throw new Error(json?.error || '시트 동기화에 실패했습니다.');
-      }
-
-      const appended = Number(json?.appended ?? 0);
-      const updated = Number(json?.updated ?? 0);
-      const skipped = Number(json?.skipped ?? 0);
-      pushToast('success', `시트 동기화 완료 (추가 ${appended}건, 갱신 ${updated}건, 건너뜀 ${skipped}건)`);
-    } catch (e: unknown) {
-      const message = e instanceof Error ? e.message : '시트 동기화 중 오류가 발생했습니다.';
-      setErrorMsg(message);
-    } finally {
-      setBusySyncSheet(false);
-    }
   };
 
   const checkIntranetRegistrationRows = async (
@@ -1394,16 +1114,6 @@ const loadLeaders = async () => {
         setErrorMsg(`초기화 실패: ${error.message}`);
         return;
       }
-
-      // 3) 로컬 오디오 URL 정리(메모리 누수 방지)
-      setAudioUrlByAppId((prev) => {
-        for (const url of Object.values(prev)) {
-          try {
-            URL.revokeObjectURL(url);
-          } catch {}
-        }
-        return {};
-      });
 
       pushToast('success', '초기화 완료');
       await loadStatus();
@@ -1794,7 +1504,6 @@ const copyBoardAsImage = async () => {
       return;
     }
     void loadApplies();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [checking, applyPage, applyRegionFilter]);
 
   // 로그인 + role 체크 + 초기 로드 + realtime
@@ -2277,7 +1986,6 @@ const copyBoardAsImage = async () => {
       <ApplyList
         filteredApplies={filteredApplies}
         totalApplies={totalApplyCount}
-        hasAnyApplies={totalApplyCount > 0}
         regionsMap={regionsMap}
         applyRegionFilter={applyRegionFilter}
         setApplyRegionFilter={handleApplyRegionFilterChange}
@@ -2298,21 +2006,10 @@ const copyBoardAsImage = async () => {
         setIsComposingCompanyById={setIsComposingCompanyById}
         busyUpdateCompanyId={busyUpdateCompanyId}
         updateCompanyName={updateCompanyName}
-        recordingsByAppId={recordingsByAppId}
-        uploadingByAppId={uploadingByAppId}
-        dragOverAppId={dragOverAppId}
-        setDragOverAppId={setDragOverAppId}
-        audioUrlByAppId={audioUrlByAppId}
-        openPlayerAppId={openPlayerAppId}
-        handleUploadRecording={handleUploadRecording}
-        handlePlayRecording={handlePlayRecording}
-        handleDeleteRecording={handleDeleteRecording}
         handleToggleReviewed={handleToggleReviewed}
         toggleExcludeApply={toggleExcludeApply}
         deleteApply={deleteApply}
         busyDelete={busyDelete}
-        onSyncToSheet={syncSupportListToSheet}
-        busySyncToSheet={busySyncSheet}
         intranetStatusByAppId={intranetStatusByAppId}
         onCheckIntranetRegistration={checkIntranetRegistration}
         busyIntranetCheck={busyIntranetCheck}

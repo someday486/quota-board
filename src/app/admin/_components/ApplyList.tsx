@@ -8,7 +8,6 @@ import {
   tdSmall,
   thSmall,
 } from '../styles';
-import RecordingsCell from './RecordingsCell';
 import { useIsMobile } from '@/hooks/useIsMobile';
 
 type RegionRow = {
@@ -25,19 +24,6 @@ type LiveApplyRow = {
   company_name: string;
   is_excluded: boolean;
   is_reserve: boolean;
-  reviewed: boolean;
-  reviewed_at: string | null;
-  reviewed_by: string | null;
-};
-
-type CallRecordingRow = {
-  id: string;
-  application_id: string;
-  file_path: string;
-  file_name: string | null;
-  content_type: string | null;
-  size_bytes: number | null;
-  uploaded_at: string;
   reviewed: boolean;
   reviewed_at: string | null;
   reviewed_by: string | null;
@@ -79,7 +65,6 @@ type IntranetCheckResult = {
 type ApplyListProps = {
   filteredApplies: LiveApplyRow[];
   totalApplies: number;
-  hasAnyApplies: boolean;
   regionsMap: Map<string, RegionRow>;
   applyRegionFilter: string;
   setApplyRegionFilter: (value: string) => void;
@@ -97,21 +82,10 @@ type ApplyListProps = {
   setIsComposingCompanyById: Dispatch<SetStateAction<Record<string, boolean>>>;
   busyUpdateCompanyId: string | null;
   updateCompanyName: (id: string) => void;
-  recordingsByAppId: Record<string, CallRecordingRow | null>;
-  uploadingByAppId: Record<string, boolean>;
-  dragOverAppId: string | null;
-  setDragOverAppId: (value: string | null) => void;
-  audioUrlByAppId: Record<string, string>;
-  openPlayerAppId: string | null;
-  handleUploadRecording: (applicationId: string, file: File) => void;
-  handlePlayRecording: (applicationId: string) => void;
-  handleDeleteRecording: (applicationId: string) => void;
   handleToggleReviewed: (applicationId: string, checked: boolean) => void;
   toggleExcludeApply: (row: LiveApplyRow) => void;
   deleteApply: (row: LiveApplyRow) => void;
   busyDelete: string | null;
-  onSyncToSheet: () => void;
-  busySyncToSheet: boolean;
   intranetStatusByAppId: Record<string, IntranetCheckResult>;
   onCheckIntranetRegistration: () => void;
   busyIntranetCheck: boolean;
@@ -202,7 +176,6 @@ function IntranetStatusBadge({ result }: { result?: IntranetCheckResult }) {
 export default function ApplyList({
   filteredApplies,
   totalApplies,
-  hasAnyApplies,
   regionsMap,
   applyRegionFilter,
   setApplyRegionFilter,
@@ -220,21 +193,10 @@ export default function ApplyList({
   setIsComposingCompanyById,
   busyUpdateCompanyId,
   updateCompanyName,
-  recordingsByAppId,
-  uploadingByAppId,
-  dragOverAppId,
-  setDragOverAppId,
-  audioUrlByAppId,
-  openPlayerAppId,
-  handleUploadRecording,
-  handlePlayRecording,
-  handleDeleteRecording,
   handleToggleReviewed,
   toggleExcludeApply,
   deleteApply,
   busyDelete,
-  onSyncToSheet,
-  busySyncToSheet,
   intranetStatusByAppId,
   onCheckIntranetRegistration,
   busyIntranetCheck,
@@ -419,20 +381,6 @@ export default function ApplyList({
           >
             팀장 지원 목록 다운로드
           </button>
-          <button
-            onClick={onSyncToSheet}
-            style={{
-              ...rowBtn,
-              height: 34,
-              padding: '0 10px',
-              opacity: hasAnyApplies && !busySyncToSheet ? 1 : 0.6,
-              width: isMobile ? '100%' : 'auto',
-            }}
-            disabled={!hasAnyApplies || busySyncToSheet}
-            title="현재 전체 팀장지원목록을 시트에 반영(기존 데이터 유지, 신규만 추가)"
-          >
-            {busySyncToSheet ? '동기화중...' : '시트 동기화'}
-          </button>
         </div>
       </div>
 
@@ -481,7 +429,7 @@ export default function ApplyList({
               fontSize: isMobile ? 13 : 14,
               tableLayout: 'fixed',
               width: '100%',
-              minWidth: 1160,
+              minWidth: 900,
             }}
           >
             <thead>
@@ -491,7 +439,6 @@ export default function ApplyList({
                 <th style={{ ...thSmall, width: 90, textAlign: 'center' }}>팀장</th>
                 <th style={{ ...thSmall }}>기업명</th>
                 <th style={{ ...thSmall, width: 118, textAlign: 'center' }}>인트라넷</th>
-                <th style={{ ...thSmall, width: 310, textAlign: 'center' }}>녹취</th>
                 <th style={{ ...thSmall, width: 90, textAlign: 'center' }}>검수</th>
                 <th style={{ ...thSmall, width: 70, textAlign: 'center' }}>제외</th>
                 <th style={{ ...thSmall, width: 70, textAlign: 'center' }}>삭제</th>
@@ -589,21 +536,6 @@ export default function ApplyList({
                       <IntranetStatusBadge result={intranetStatusByAppId[a.id]} />
                     </td>
 
-                    {/* ✅ 녹취 업로드/재생 */}
-                    <RecordingsCell
-                      recording={recordingsByAppId[a.id]}
-                      uploading={!!uploadingByAppId[a.id]}
-                      dragOn={dragOverAppId === a.id}
-                      audioUrl={audioUrlByAppId[a.id]}
-                      isOpen={openPlayerAppId === a.id}
-                      onDragOver={() => setDragOverAppId(a.id)}
-                      onDragLeave={() => setDragOverAppId(null)}
-                      onDrop={(file) => handleUploadRecording(a.id, file)}
-                      onUpload={(file) => handleUploadRecording(a.id, file)}
-                      onPlay={() => handlePlayRecording(a.id)}
-                      onDelete={() => handleDeleteRecording(a.id)}
-                    />
-
                     {/* ✅ 검수 완료 체크 */}
                     <td style={{ ...tdSmall, width: 90, textAlign: 'center' }}>
                       {(() => {
@@ -665,7 +597,7 @@ export default function ApplyList({
 
               {displayedApplies.length === 0 && (
                 <tr>
-                  <td colSpan={9} style={{ padding: 12, color: '#666', textAlign: 'center' }}>
+                  <td colSpan={8} style={{ padding: 12, color: '#666', textAlign: 'center' }}>
                     표시할 지원 내역이 없습니다.
                   </td>
                 </tr>
