@@ -76,6 +76,7 @@ type IntranetCheckMatch = {
   pmName?: string;
   region1?: string;
   region2?: string;
+  address?: string;
   dbRoute?: string;
   dbState?: string;
   contractCheck?: string;

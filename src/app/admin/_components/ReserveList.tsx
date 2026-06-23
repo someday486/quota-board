@@ -39,6 +39,7 @@ type IntranetCheckMatch = {
   pmName?: string;
   region1?: string;
   region2?: string;
+  address?: string;
   dbRoute?: string;
   dbState?: string;
   contractCheck?: string;
@@ -99,12 +100,13 @@ function intranetStatusTitle(result?: IntranetCheckResult) {
     result.appliedDate ? `신청일: ${result.appliedDate}` : '',
   ].filter(Boolean);
   for (const match of result.matches ?? []) {
+    const address = match.address || [match.region1, match.region2].filter(Boolean).join(' ');
     lines.push(
       [
         match.companyName,
         match.apDate ? `AP ${match.apDate}${match.apTime ? ` ${match.apTime}` : ''}` : '',
         match.castMember ? `섭외자 ${match.castMember}` : '',
-        match.region1 || match.region2 ? `지역 ${[match.region1, match.region2].filter(Boolean).join(' ')}` : '',
+        address ? `주소 ${address}` : '',
         match.dbRoute ? `경로 ${match.dbRoute}` : '',
       ]
         .filter(Boolean)
@@ -117,11 +119,12 @@ function intranetStatusTitle(result?: IntranetCheckResult) {
 function ReserveIntranetBadge({ result }: { result?: IntranetCheckResult }) {
   const colors = reserveIntranetStatusStyle(result?.status);
   const match = result?.matches?.[0];
-  const subText = result
+  const dateText = result
     ? match?.apDate
       ? `${match.apDate}${match.apTime ? ` ${match.apTime}` : ''}`
       : result.expectedApDate ?? ''
     : '버튼 확인';
+  const addressText = match ? match.address || [match.region1, match.region2].filter(Boolean).join(' ') : '';
 
   return (
     <div title={intranetStatusTitle(result)} style={{ display: 'inline-flex', flexDirection: 'column', gap: 3, alignItems: 'center' }}>
@@ -144,7 +147,23 @@ function ReserveIntranetBadge({ result }: { result?: IntranetCheckResult }) {
       >
         {intranetStatusLabel(result?.status)}
       </span>
-      <span style={{ fontSize: 11, color: '#64748b', lineHeight: 1.2, whiteSpace: 'nowrap' }}>{subText}</span>
+      <span style={{ fontSize: 11, color: '#64748b', lineHeight: 1.2, whiteSpace: 'nowrap' }}>{dateText}</span>
+      {addressText && (
+        <span
+          style={{
+            maxWidth: 104,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            color: '#475569',
+            fontSize: 11,
+            fontWeight: 800,
+            lineHeight: 1.2,
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {addressText}
+        </span>
+      )}
     </div>
   );
 }
