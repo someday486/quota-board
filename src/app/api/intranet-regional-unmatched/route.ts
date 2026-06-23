@@ -47,6 +47,16 @@ type DataCenterRegionalResponse = {
   error?: string;
 };
 
+type DataCenterSyncResponse = {
+  result?: boolean;
+  targetDate?: string;
+  total?: number;
+  inserted?: number;
+  skippedRoute?: number;
+  castTodayCount?: number;
+  error?: string;
+};
+
 type DataCenterResult = {
   ok: boolean;
   status: number;
@@ -153,6 +163,31 @@ function requestDataCenterJson(
     req.on('error', reject);
     req.end();
   });
+}
+
+async function syncCastTomorrowForBaseDate(baseDate: string, token: string) {
+  const syncUrl =
+    env('DATA_CENTER_CAST_TOMORROW_SYNC_URL') ||
+    'https://mega-info.re.kr/data_center/api/quota_cast_tomorrow_sync.php';
+  const targetUrl = new URL(syncUrl);
+  targetUrl.searchParams.set('t', token);
+  targetUrl.searchParams.set('baseDate', baseDate);
+
+  const dataCenterConnectHost =
+    env('DATA_CENTER_INTRACHECK_CONNECT_HOST') ||
+    (targetUrl.hostname === 'mega-info.re.kr' ? '112.175.184.33' : '');
+
+  const dataCenter = await requestDataCenterJson(
+    targetUrl,
+    token,
+    dataCenterConnectHost || undefined,
+    targetUrl.hostname,
+  );
+  const json = dataCenter.json as DataCenterSyncResponse;
+  if (!dataCenter.ok || json?.result === false) {
+    throw new Error(json?.error || '데이터센터 추가DB등록에 실패했습니다.');
+  }
+  return json;
 }
 
 function decodeText(value: string) {
@@ -281,6 +316,8 @@ export async function POST(req: NextRequest) {
       .lt('created_at', endIso)
       .limit(5000);
 
+    const syncResult = await syncCastTomorrowForBaseDate(baseDate, dataCenterToken);
+
     const [quotaResult, dataCenter] = await Promise.all([
       quotaQuery,
       requestDataCenterJson(
@@ -325,6 +362,7 @@ export async function POST(req: NextRequest) {
       quotaCount: quotaRows.length,
       intranetRegionalCount: intranetRows.length,
       unmatchedCount: unmatched.length,
+      syncResult,
       rows: unmatched,
     });
   } catch (e: unknown) {

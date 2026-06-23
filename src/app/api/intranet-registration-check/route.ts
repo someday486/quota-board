@@ -27,6 +27,16 @@ type DataCenterResult = {
   json: unknown;
 };
 
+type DataCenterSyncResponse = {
+  result?: boolean;
+  targetDate?: string;
+  total?: number;
+  inserted?: number;
+  skippedRoute?: number;
+  castTodayCount?: number;
+  error?: string;
+};
+
 function env(name: string) {
   const raw = process.env[name];
   if (!raw) return '';
@@ -119,6 +129,38 @@ function postDataCenterJson(
   });
 }
 
+async function syncCastTomorrowForBaseDates(baseDates: string[], token: string) {
+  const syncUrl =
+    env('DATA_CENTER_CAST_TOMORROW_SYNC_URL') ||
+    'https://mega-info.re.kr/data_center/api/quota_cast_tomorrow_sync.php';
+  const uniqueDates = Array.from(new Set(baseDates.filter(Boolean))).slice(0, 5);
+  const summaries: DataCenterSyncResponse[] = [];
+
+  for (const baseDate of uniqueDates) {
+    const targetUrl = new URL(syncUrl);
+    targetUrl.searchParams.set('t', token);
+    targetUrl.searchParams.set('baseDate', baseDate);
+    const dataCenterConnectHost =
+      env('DATA_CENTER_INTRACHECK_CONNECT_HOST') ||
+      (targetUrl.hostname === 'mega-info.re.kr' ? '112.175.184.33' : '');
+
+    const dataCenter = await postDataCenterJson(
+      targetUrl,
+      token,
+      { source: 'quota-board', baseDate },
+      dataCenterConnectHost || undefined,
+      targetUrl.hostname,
+    );
+    const json = dataCenter.json as DataCenterSyncResponse;
+    if (!dataCenter.ok || json?.result === false) {
+      throw new Error(json?.error || '데이터센터 추가DB등록에 실패했습니다.');
+    }
+    summaries.push(json);
+  }
+
+  return summaries;
+}
+
 export async function POST(req: NextRequest) {
   try {
     const supabaseUrl = env('NEXT_PUBLIC_SUPABASE_URL');
@@ -184,12 +226,16 @@ export async function POST(req: NextRequest) {
       companyName: String(row.companyName ?? '').trim(),
     }));
 
+    const syncResults = await syncCastTomorrowForBaseDates(
+      payloadRows.map((row) => row.appliedDate),
+      dataCenterToken,
+    );
+
     const targetUrl = new URL(dataCenterUrl);
     targetUrl.searchParams.set('t', dataCenterToken);
     const dataCenterConnectHost =
       env('DATA_CENTER_INTRACHECK_CONNECT_HOST') ||
       (targetUrl.hostname === 'mega-info.re.kr' ? '112.175.184.33' : '');
-
     const dataCenter = await postDataCenterJson(
       targetUrl,
       dataCenterToken,
@@ -206,7 +252,8 @@ export async function POST(req: NextRequest) {
       throw new Error(message || '인트라넷 등록 확인에 실패했습니다.');
     }
 
-    return NextResponse.json(json);
+    const responsePayload = typeof json === 'object' && json !== null ? json : { result: true };
+    return NextResponse.json({ ...responsePayload, syncResults });
   } catch (e: unknown) {
     console.error('[intranet-registration-check] failed:', e);
     return NextResponse.json({ error: errorMessage(e) }, { status: 500 });
