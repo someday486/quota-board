@@ -1076,12 +1076,16 @@ const handleToggleReviewed = async (applicationId: string, checked: boolean) => 
     }
   };
 
-  const checkIntranetRegistration = async () => {
+  const checkIntranetRegistrationRows = async (
+    targetRows: LiveApplyRow[],
+    emptyMessage: string,
+    doneLabel: string,
+  ) => {
     pushToast('info', '');
     if (busyIntranetCheck) return;
 
-    if (filteredApplies.length === 0) {
-      pushToast('info', '확인할 지원 목록이 없습니다.');
+    if (targetRows.length === 0) {
+      pushToast('info', emptyMessage);
       return;
     }
 
@@ -1091,7 +1095,7 @@ const handleToggleReviewed = async (applicationId: string, checked: boolean) => 
       return;
     }
 
-    const rows = filteredApplies.map((a) => ({
+    const rows = targetRows.map((a) => ({
       applicationId: a.id,
       appliedAt: a.created_at,
       leaderName: a.leader_name ?? '',
@@ -1127,7 +1131,7 @@ const handleToggleReviewed = async (applicationId: string, checked: boolean) => 
       const needsCheck = results.length - registered - missing;
       pushToast(
         'success',
-        `인트라넷 등록 확인 완료 (등록 ${registered}건, 미등록 ${missing}건, 확인필요 ${needsCheck}건)`,
+        `${doneLabel} (등록 ${registered}건, 미등록 ${missing}건, 확인필요 ${needsCheck}건)`,
       );
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : '인트라넷 등록 확인 중 오류가 발생했습니다.';
@@ -1135,6 +1139,22 @@ const handleToggleReviewed = async (applicationId: string, checked: boolean) => 
     } finally {
       setBusyIntranetCheck(false);
     }
+  };
+
+  const checkIntranetRegistration = async () => {
+    await checkIntranetRegistrationRows(
+      filteredApplies,
+      '확인할 지원 목록이 없습니다.',
+      '인트라넷 등록 확인 완료',
+    );
+  };
+
+  const checkReserveIntranetRegistration = async () => {
+    await checkIntranetRegistrationRows(
+      reserveApplies,
+      '확인할 예비 등록 목록이 없습니다.',
+      '예비 등록 인트라넷 확인 완료',
+    );
   };
 
   const loadApplyLimit = async () => {
@@ -2306,6 +2326,9 @@ const copyBoardAsImage = async () => {
         toggleExcludeApply={toggleExcludeApply}
         deleteApply={deleteApply}
         busyDelete={busyDelete}
+        intranetStatusByAppId={intranetStatusByAppId}
+        onCheckReserveIntranetRegistration={checkReserveIntranetRegistration}
+        busyIntranetCheck={busyIntranetCheck}
         formatDateTime={fmtDT}
       />
 
