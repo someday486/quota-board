@@ -70,6 +70,45 @@ type SupportSyncRow = {
   is_excluded: boolean;
 };
 
+type IntranetCheckStatus =
+  | 'registered'
+  | 'missing'
+  | 'date_mismatch'
+  | 'multiple'
+  | 'similar'
+  | 'error';
+
+type IntranetCheckMatch = {
+  companyName?: string;
+  apDate?: string;
+  apTime?: string;
+  castDate?: string;
+  castMember?: string;
+  pmName?: string;
+  region1?: string;
+  region2?: string;
+  dbRoute?: string;
+  dbState?: string;
+  contractCheck?: string;
+  businessNumber?: string;
+};
+
+type IntranetCheckResult = {
+  applicationId: string;
+  status: IntranetCheckStatus;
+  expectedApDate?: string;
+  appliedDate?: string;
+  matchCount?: number;
+  matches?: IntranetCheckMatch[];
+  reason?: string;
+};
+
+type IntranetCheckResponse = {
+  result?: boolean;
+  results?: IntranetCheckResult[];
+  error?: string;
+};
+
 type RegionRow = {
   id: string;
   region_name: string;
@@ -297,6 +336,8 @@ export default function AdminPage() {
   const [reserveApplies, setReserveApplies] = useState<LiveApplyRow[]>([]);
   const [busyDelete, setBusyDelete] = useState<string | null>(null);
   const [busySyncSheet, setBusySyncSheet] = useState(false);
+  const [busyIntranetCheck, setBusyIntranetCheck] = useState(false);
+  const [intranetStatusByAppId, setIntranetStatusByAppId] = useState<Record<string, IntranetCheckResult>>({});
   const totalAppliedCount = useMemo(
     () => regionsStatus.reduce((sum, row) => sum + Number(row.applied_count ?? 0), 0),
     [regionsStatus],
@@ -1032,6 +1073,67 @@ const handleToggleReviewed = async (applicationId: string, checked: boolean) => 
       setErrorMsg(message);
     } finally {
       setBusySyncSheet(false);
+    }
+  };
+
+  const checkIntranetRegistration = async () => {
+    pushToast('info', '');
+    if (busyIntranetCheck) return;
+
+    if (filteredApplies.length === 0) {
+      pushToast('info', '확인할 지원 목록이 없습니다.');
+      return;
+    }
+
+    const token = await getAccessToken();
+    if (!token) {
+      setErrorMsg('인증 토큰을 확인할 수 없습니다. 다시 로그인해 주세요.');
+      return;
+    }
+
+    const rows = filteredApplies.map((a) => ({
+      applicationId: a.id,
+      appliedAt: a.created_at,
+      leaderName: a.leader_name ?? '',
+      regionName: regionsMap.get(a.region_id)?.region_name ?? a.region_id,
+      companyName: a.company_name ?? '',
+    }));
+
+    setBusyIntranetCheck(true);
+    try {
+      const res = await fetch('/api/intranet-registration-check', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ rows }),
+      });
+
+      const json = (await res.json().catch(() => null)) as IntranetCheckResponse | null;
+      if (!res.ok) {
+        throw new Error(json?.error || '인트라넷 등록 확인에 실패했습니다.');
+      }
+
+      const nextMap: Record<string, IntranetCheckResult> = {};
+      for (const result of json?.results ?? []) {
+        if (result.applicationId) nextMap[result.applicationId] = result;
+      }
+      setIntranetStatusByAppId((prev) => ({ ...prev, ...nextMap }));
+
+      const results = Object.values(nextMap);
+      const registered = results.filter((r) => r.status === 'registered' || r.status === 'multiple').length;
+      const missing = results.filter((r) => r.status === 'missing').length;
+      const needsCheck = results.length - registered - missing;
+      pushToast(
+        'success',
+        `인트라넷 등록 확인 완료 (등록 ${registered}건, 미등록 ${missing}건, 확인필요 ${needsCheck}건)`,
+      );
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : '인트라넷 등록 확인 중 오류가 발생했습니다.';
+      setErrorMsg(message);
+    } finally {
+      setBusyIntranetCheck(false);
     }
   };
 
@@ -2191,6 +2293,9 @@ const copyBoardAsImage = async () => {
         busyDelete={busyDelete}
         onSyncToSheet={syncSupportListToSheet}
         busySyncToSheet={busySyncSheet}
+        intranetStatusByAppId={intranetStatusByAppId}
+        onCheckIntranetRegistration={checkIntranetRegistration}
+        busyIntranetCheck={busyIntranetCheck}
         formatDateTime={fmtDT}
       />
 

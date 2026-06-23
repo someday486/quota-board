@@ -43,6 +43,39 @@ type CallRecordingRow = {
   reviewed_by: string | null;
 };
 
+type IntranetCheckStatus =
+  | 'registered'
+  | 'missing'
+  | 'date_mismatch'
+  | 'multiple'
+  | 'similar'
+  | 'error';
+
+type IntranetCheckMatch = {
+  companyName?: string;
+  apDate?: string;
+  apTime?: string;
+  castDate?: string;
+  castMember?: string;
+  pmName?: string;
+  region1?: string;
+  region2?: string;
+  dbRoute?: string;
+  dbState?: string;
+  contractCheck?: string;
+  businessNumber?: string;
+};
+
+type IntranetCheckResult = {
+  applicationId: string;
+  status: IntranetCheckStatus;
+  expectedApDate?: string;
+  appliedDate?: string;
+  matchCount?: number;
+  matches?: IntranetCheckMatch[];
+  reason?: string;
+};
+
 type ApplyListProps = {
   filteredApplies: LiveApplyRow[];
   totalApplies: number;
@@ -79,8 +112,92 @@ type ApplyListProps = {
   busyDelete: string | null;
   onSyncToSheet: () => void;
   busySyncToSheet: boolean;
+  intranetStatusByAppId: Record<string, IntranetCheckResult>;
+  onCheckIntranetRegistration: () => void;
+  busyIntranetCheck: boolean;
   formatDateTime: (value?: string | null) => string;
 };
+
+function intranetStatusLabel(status?: IntranetCheckStatus) {
+  if (status === 'registered') return '등록완료';
+  if (status === 'missing') return '미등록';
+  if (status === 'date_mismatch') return '날짜확인';
+  if (status === 'multiple') return '중복확인';
+  if (status === 'similar') return '유사확인';
+  if (status === 'error') return '오류';
+  return '미확인';
+}
+
+function intranetStatusStyle(status?: IntranetCheckStatus) {
+  if (status === 'registered') {
+    return { border: '#bbf7d0', background: '#f0fdf4', color: '#166534' };
+  }
+  if (status === 'missing' || status === 'error') {
+    return { border: '#fecaca', background: '#fef2f2', color: '#b91c1c' };
+  }
+  if (status === 'date_mismatch' || status === 'multiple' || status === 'similar') {
+    return { border: '#fde68a', background: '#fffbeb', color: '#92400e' };
+  }
+  return { border: '#e5e7eb', background: '#f8fafc', color: '#64748b' };
+}
+
+function intranetStatusTitle(result?: IntranetCheckResult) {
+  if (!result) return '인트라넷 등록확인 버튼을 눌러 확인하세요.';
+  const lines = [
+    `상태: ${intranetStatusLabel(result.status)}`,
+    result.expectedApDate ? `예상 미팅일: ${result.expectedApDate}` : '',
+    result.appliedDate ? `신청일: ${result.appliedDate}` : '',
+  ].filter(Boolean);
+  for (const match of result.matches ?? []) {
+    lines.push(
+      [
+        match.companyName,
+        match.apDate ? `AP ${match.apDate}${match.apTime ? ` ${match.apTime}` : ''}` : '',
+        match.castMember ? `섭외자 ${match.castMember}` : '',
+        match.region1 || match.region2 ? `지역 ${[match.region1, match.region2].filter(Boolean).join(' ')}` : '',
+        match.dbRoute ? `경로 ${match.dbRoute}` : '',
+      ]
+        .filter(Boolean)
+        .join(' / '),
+    );
+  }
+  return lines.join('\n');
+}
+
+function IntranetStatusBadge({ result }: { result?: IntranetCheckResult }) {
+  const colors = intranetStatusStyle(result?.status);
+  const match = result?.matches?.[0];
+  const subText = result
+    ? match?.apDate
+      ? `${match.apDate}${match.apTime ? ` ${match.apTime}` : ''}`
+      : result.expectedApDate ?? ''
+    : '버튼 확인';
+
+  return (
+    <div title={intranetStatusTitle(result)} style={{ display: 'inline-flex', flexDirection: 'column', gap: 3, alignItems: 'center' }}>
+      <span
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          minWidth: 70,
+          height: 24,
+          padding: '0 8px',
+          borderRadius: 999,
+          border: `1px solid ${colors.border}`,
+          background: colors.background,
+          color: colors.color,
+          fontSize: 12,
+          fontWeight: 900,
+          whiteSpace: 'nowrap',
+        }}
+      >
+        {intranetStatusLabel(result?.status)}
+      </span>
+      <span style={{ fontSize: 11, color: '#64748b', lineHeight: 1.2, whiteSpace: 'nowrap' }}>{subText}</span>
+    </div>
+  );
+}
 
 export default function ApplyList({
   filteredApplies,
@@ -118,6 +235,9 @@ export default function ApplyList({
   busyDelete,
   onSyncToSheet,
   busySyncToSheet,
+  intranetStatusByAppId,
+  onCheckIntranetRegistration,
+  busyIntranetCheck,
   formatDateTime,
 }: ApplyListProps) {
   const isMobile = useIsMobile();
@@ -132,14 +252,19 @@ export default function ApplyList({
     if (displayedApplies.length === 0) return;
 
     const rows: string[][] = [
-      ['신청시각', '지역', '팀장', '기업명', '제외여부'],
-      ...displayedApplies.map((a) => [
-        formatDateTime(a.created_at),
-        regionsMap.get(a.region_id)?.region_name ?? a.region_id,
-        a.leader_name ?? '',
-        a.company_name ?? '',
-        a.is_excluded ? '제외' : '정상',
-      ]),
+      ['신청시각', '지역', '팀장', '기업명', '인트라넷상태', '예상미팅일', '제외여부'],
+      ...displayedApplies.map((a) => {
+        const intranet = intranetStatusByAppId[a.id];
+        return [
+          formatDateTime(a.created_at),
+          regionsMap.get(a.region_id)?.region_name ?? a.region_id,
+          a.leader_name ?? '',
+          a.company_name ?? '',
+          intranetStatusLabel(intranet?.status),
+          intranet?.expectedApDate ?? '',
+          a.is_excluded ? '제외' : '정상',
+        ];
+      }),
     ];
 
     try {
@@ -147,7 +272,7 @@ export default function ApplyList({
       const wb = XLSX.utils.book_new();
       const ws = XLSX.utils.aoa_to_sheet(rows);
 
-      ws['!cols'] = [{ wch: 22 }, { wch: 12 }, { wch: 14 }, { wch: 28 }, { wch: 12 }];
+      ws['!cols'] = [{ wch: 22 }, { wch: 12 }, { wch: 14 }, { wch: 28 }, { wch: 14 }, { wch: 14 }, { wch: 12 }];
 
       XLSX.utils.book_append_sheet(wb, ws, '팀장지원목록');
       const out = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
@@ -272,6 +397,21 @@ export default function ApplyList({
           </label>
 
           <button
+            onClick={onCheckIntranetRegistration}
+            style={{
+              ...rowBtn,
+              height: 34,
+              padding: '0 10px',
+              opacity: displayedApplies.length > 0 && !busyIntranetCheck ? 1 : 0.6,
+              width: isMobile ? '100%' : 'auto',
+            }}
+            disabled={displayedApplies.length === 0 || busyIntranetCheck}
+            title="현재 표시 중인 팀장 지원 목록이 인트라넷에 다음 영업일 미팅건으로 등록됐는지 확인"
+          >
+            {busyIntranetCheck ? '등록 확인중...' : '인트라넷 등록확인'}
+          </button>
+
+          <button
             onClick={handleDownloadExcel}
             style={{ ...rowBtn, height: 34, padding: '0 10px', opacity: displayedApplies.length > 0 ? 1 : 0.6, width: isMobile ? '100%' : 'auto' }}
             disabled={displayedApplies.length === 0}
@@ -341,7 +481,7 @@ export default function ApplyList({
               fontSize: isMobile ? 13 : 14,
               tableLayout: 'fixed',
               width: '100%',
-              minWidth: 1040,
+              minWidth: 1160,
             }}
           >
             <thead>
@@ -350,6 +490,7 @@ export default function ApplyList({
                 <th style={{ ...thSmall, width: 70, textAlign: 'center' }}>지역</th>
                 <th style={{ ...thSmall, width: 90, textAlign: 'center' }}>팀장</th>
                 <th style={{ ...thSmall }}>기업명</th>
+                <th style={{ ...thSmall, width: 118, textAlign: 'center' }}>인트라넷</th>
                 <th style={{ ...thSmall, width: 310, textAlign: 'center' }}>녹취</th>
                 <th style={{ ...thSmall, width: 90, textAlign: 'center' }}>검수</th>
                 <th style={{ ...thSmall, width: 70, textAlign: 'center' }}>제외</th>
@@ -444,6 +585,10 @@ export default function ApplyList({
                       )}
                     </td>
 
+                    <td style={{ ...tdSmall, width: 118, textAlign: 'center' }}>
+                      <IntranetStatusBadge result={intranetStatusByAppId[a.id]} />
+                    </td>
+
                     {/* ✅ 녹취 업로드/재생 */}
                     <RecordingsCell
                       recording={recordingsByAppId[a.id]}
@@ -520,7 +665,7 @@ export default function ApplyList({
 
               {displayedApplies.length === 0 && (
                 <tr>
-                  <td colSpan={8} style={{ padding: 12, color: '#666', textAlign: 'center' }}>
+                  <td colSpan={9} style={{ padding: 12, color: '#666', textAlign: 'center' }}>
                     표시할 지원 내역이 없습니다.
                   </td>
                 </tr>
