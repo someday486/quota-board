@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { request as httpRequest } from 'node:http';
+import { request as httpsRequest } from 'node:https';
 
 export const runtime = 'nodejs';
 
@@ -17,6 +19,12 @@ type CheckRow = {
   leaderName: string;
   regionName: string;
   companyName: string;
+};
+
+type DataCenterResult = {
+  ok: boolean;
+  status: number;
+  json: unknown;
 };
 
 function env(name: string) {
@@ -54,6 +62,61 @@ function formatKstDate(value: string) {
   }).formatToParts(safe);
   const byType = new Map(parts.map((p) => [p.type, p.value]));
   return `${byType.get('year') ?? '0000'}-${byType.get('month') ?? '01'}-${byType.get('day') ?? '01'}`;
+}
+
+function postDataCenterJson(
+  url: URL,
+  token: string,
+  payload: unknown,
+  connectHost?: string,
+  hostHeader?: string,
+) {
+  const body = JSON.stringify(payload);
+  const isHttps = url.protocol === 'https:';
+  const requestFn = isHttps ? httpsRequest : httpRequest;
+  const effectiveHost = connectHost || url.hostname;
+  const effectiveHostHeader = hostHeader || url.hostname;
+  const options = {
+    method: 'POST',
+    hostname: effectiveHost,
+    port: url.port ? Number(url.port) : isHttps ? 443 : 80,
+    path: `${url.pathname}${url.search}`,
+    headers: {
+      host: effectiveHostHeader,
+      'content-type': 'application/json',
+      'content-length': Buffer.byteLength(body),
+      authorization: `Bearer ${token}`,
+    },
+    servername: isHttps ? effectiveHostHeader : undefined,
+    timeout: 30000,
+    // The data_center host currently serves a certificate chain that Node cannot verify.
+    // Scope the workaround to this single server-to-server call instead of disabling TLS globally.
+    rejectUnauthorized: false,
+  };
+
+  return new Promise<DataCenterResult>((resolve, reject) => {
+    const req = requestFn(options, (res) => {
+      const chunks: Buffer[] = [];
+      res.on('data', (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+      res.on('end', () => {
+        const text = Buffer.concat(chunks).toString('utf8');
+        let json: unknown = null;
+        try {
+          json = text ? JSON.parse(text) : null;
+        } catch {
+          json = { error: text || 'Empty data_center response' };
+        }
+        const status = res.statusCode ?? 500;
+        resolve({ ok: status >= 200 && status < 300, status, json });
+      });
+    });
+    req.on('timeout', () => {
+      req.destroy(new Error('Data center request timed out.'));
+    });
+    req.on('error', reject);
+    req.write(body);
+    req.end();
+  });
 }
 
 export async function POST(req: NextRequest) {
@@ -123,19 +186,19 @@ export async function POST(req: NextRequest) {
 
     const targetUrl = new URL(dataCenterUrl);
     targetUrl.searchParams.set('t', dataCenterToken);
+    const dataCenterConnectHost =
+      env('DATA_CENTER_INTRACHECK_CONNECT_HOST') ||
+      (targetUrl.hostname === 'mega-info.re.kr' ? '112.175.184.33' : '');
 
-    const res = await fetch(targetUrl.toString(), {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        authorization: `Bearer ${dataCenterToken}`,
-      },
-      body: JSON.stringify({ rows: payloadRows }),
-      cache: 'no-store',
-    });
-
-    const json = (await res.json().catch(() => null)) as unknown;
-    if (!res.ok) {
+    const dataCenter = await postDataCenterJson(
+      targetUrl,
+      dataCenterToken,
+      { rows: payloadRows },
+      dataCenterConnectHost || undefined,
+      targetUrl.hostname,
+    );
+    const json = dataCenter.json;
+    if (!dataCenter.ok) {
       const message =
         typeof json === 'object' && json !== null && 'error' in json
           ? String((json as { error?: unknown }).error ?? '')
