@@ -786,6 +786,11 @@ const handleToggleReviewed = async (applicationId: string, checked: boolean) => 
       pushToast('info', '기업명을 입력해주세요.');
       return;
     }
+    const targetRow =
+      applies.find((row) => row.id === id) ??
+      reserveApplies.find((row) => row.id === id) ??
+      boardApplies.find((row) => row.id === id) ??
+      null;
 
     setBusyUpdateCompanyId(id);
 
@@ -801,6 +806,20 @@ const handleToggleReviewed = async (applicationId: string, checked: boolean) => 
     setEditingCompanyId(null);
     setBusyUpdateCompanyId(null);
 
+    if (targetRow) {
+      await appendSupportLog({
+        event_type: targetRow.is_reserve ? 'RESERVE_APPLY' : 'APPLY',
+        applied_at: targetRow.created_at,
+        application_id: targetRow.id,
+        leader_name: targetRow.leader_name,
+        region_id: targetRow.region_id,
+        region_name: regionsMap.get(targetRow.region_id)?.region_name ?? targetRow.region_id,
+        company_name: nextName,
+        is_reserve: targetRow.is_reserve,
+        is_excluded: targetRow.is_excluded,
+        note: 'admin_company_name_update',
+      });
+    }
     await loadApplies(); // 화면 즉시 반영
   };
 

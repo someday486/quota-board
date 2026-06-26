@@ -15,6 +15,8 @@ type ActorProfile = {
 type QuotaApplyRow = {
   id: string;
   created_at: string;
+  region_id: string | null;
+  region_name?: string | null;
   leader_name: string | null;
   company_name: string | null;
   is_reserve: boolean | null;
@@ -61,6 +63,11 @@ type DataCenterResult = {
   ok: boolean;
   status: number;
   json: unknown;
+};
+
+type RegionRow = {
+  id: string;
+  region_name: string | null;
 };
 
 function env(name: string) {
@@ -199,10 +206,18 @@ function decodeText(value: string) {
     .replace(/&#39;/g, "'");
 }
 
+function stripCorporateMarkers(value: string) {
+  return value.replace(
+    /㈜|\(\s*주\s*\)|\[\s*주\s*\]|【\s*주\s*】|^\s*주\s*[\])】]\s*|\s*[\[(【]\s*주\s*$/gu,
+    '',
+  );
+}
+
 function normalizeCompany(value: unknown) {
-  let text = decodeText(String(value ?? '')).trim().toLowerCase();
-  text = text.replace(/㈜|\(\s*주\s*\)|（\s*주\s*）|\[\s*주\s*\]|【\s*주\s*】/gu, '');
+  let text = decodeText(String(value ?? '')).normalize('NFKC').trim().toLowerCase();
+  text = stripCorporateMarkers(text);
   text = text.replace(/\(유\)|（유）|유한회사|주식회사|농업회사법인|어업회사법인|사회적협동조합|협동조합/gu, '');
+  text = stripCorporateMarkers(text);
   text = text.replace(/[\s\p{P}\p{S}]+/gu, '');
   return text;
 }
@@ -230,11 +245,59 @@ function personMatches(left: unknown, right: unknown) {
   return a !== '' && b !== '' && a === b;
 }
 
+function normalizeRegion(value: unknown) {
+  let text = decodeText(String(value ?? '')).normalize('NFKC').trim().toLowerCase();
+  text = text.replace(/[\s\p{P}\p{S}]+/gu, '');
+  text = text.replace(/특별자치도|특별자치시|특별시|광역시|자치도|도|시|군|구$/gu, '');
+  return text;
+}
+
+function regionMatches(row: IntranetRegionalRow, quota: QuotaApplyRow) {
+  const quotaRegion = normalizeRegion(quota.region_name);
+  if (!quotaRegion) return false;
+
+  const rowRegions = [
+    row.region1,
+    row.region2,
+    [row.region1, row.region2].filter(Boolean).join(' '),
+    row.address,
+  ]
+    .map(normalizeRegion)
+    .filter(Boolean);
+
+  return rowRegions.some(
+    (region) =>
+      region === quotaRegion ||
+      (quotaRegion.length >= 2 && region.includes(quotaRegion)) ||
+      (region.length >= 2 && quotaRegion.includes(region)),
+  );
+}
+
+function applicationIdMatches(row: IntranetRegionalRow, quota: QuotaApplyRow) {
+  const intranetId = String(row.id ?? '').trim();
+  return intranetId !== '' && intranetId === quota.id;
+}
+
 function findQuotaMatch(row: IntranetRegionalRow, quotaRows: QuotaApplyRow[]) {
+  const byApplicationId = quotaRows.filter((item) => applicationIdMatches(row, item));
+  if (byApplicationId.length === 1) {
+    return { matched: true, reason: 'application_id_match', candidates: byApplicationId };
+  }
+
   const companyKey = normalizeCompany(row.companyName);
   const candidates = quotaRows.filter((item) => normalizeCompany(item.company_name) === companyKey);
   if (candidates.length === 0) {
-    return { matched: false, reason: 'company_not_found', candidates };
+    const renamedCandidates = quotaRows.filter(
+      (item) => personMatches(item.leader_name, row.castMember) && regionMatches(row, item),
+    );
+    if (renamedCandidates.length === 1) {
+      return { matched: true, reason: 'company_renamed_match', candidates: renamedCandidates };
+    }
+    return {
+      matched: false,
+      reason: renamedCandidates.length > 1 ? 'company_rename_candidate_duplicate' : 'company_not_found',
+      candidates: renamedCandidates,
+    };
   }
   if (candidates.length === 1) {
     return { matched: true, reason: 'company_match', candidates };
@@ -311,15 +374,20 @@ export async function POST(req: NextRequest) {
     const { startIso, endIso } = kstDayRangeIso(baseDate);
     const quotaQuery = sbAdmin
       .from('applications_live')
-      .select('id,created_at,leader_name,company_name,is_reserve,is_excluded')
+      .select('id,created_at,region_id,leader_name,company_name,is_reserve,is_excluded')
       .gte('created_at', startIso)
       .lt('created_at', endIso)
       .limit(5000);
+    const regionsQuery = sbAdmin
+      .from('regions')
+      .select('id,region_name')
+      .limit(500);
 
     const syncResult = await syncCastTomorrowForBaseDate(baseDate, dataCenterToken);
 
-    const [quotaResult, dataCenter] = await Promise.all([
+    const [quotaResult, regionsResult, dataCenter] = await Promise.all([
       quotaQuery,
+      regionsQuery,
       requestDataCenterJson(
         targetUrl,
         dataCenterToken,
@@ -331,13 +399,25 @@ export async function POST(req: NextRequest) {
     if (quotaResult.error) {
       throw new Error(quotaResult.error.message);
     }
+    if (regionsResult.error) {
+      throw new Error(regionsResult.error.message);
+    }
 
     const json = dataCenter.json as DataCenterRegionalResponse;
     if (!dataCenter.ok || json?.result === false) {
       throw new Error(json?.error || '인트라넷 지방 목록 조회에 실패했습니다.');
     }
 
-    const quotaRows = (quotaResult.data ?? []) as QuotaApplyRow[];
+    const regionNameById = new Map(
+      ((regionsResult.data ?? []) as RegionRow[]).map((region) => [
+        String(region.id),
+        region.region_name ?? '',
+      ]),
+    );
+    const quotaRows = ((quotaResult.data ?? []) as QuotaApplyRow[]).map((row) => ({
+      ...row,
+      region_name: regionNameById.get(String(row.region_id ?? '')) ?? null,
+    }));
     const intranetRows = Array.isArray(json.rows) ? json.rows : [];
     const unmatched = intranetRows.flatMap((row) => {
       const match = findQuotaMatch(row, quotaRows);

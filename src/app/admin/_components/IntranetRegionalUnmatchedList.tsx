@@ -46,6 +46,7 @@ type Props = {
 };
 
 function reasonLabel(reason?: string) {
+  if (reason === 'company_rename_candidate_duplicate') return '이름변경 후보 중복';
   if (reason === 'company_duplicate_person_mismatch') return '섭외자 불일치';
   if (reason === 'company_not_found') return '쿼터보드 없음';
   return '확인필요';
