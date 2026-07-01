@@ -83,6 +83,8 @@ type AdminContext = {
 
 const PROFILE_SELECT =
   'user_id,display_name,email,role,is_admin,leader_group,hire_date,resigned_at,resignation_note,invalid_call_count,participation_restricted_until,participation_restriction_note';
+const PROFILE_SELECT_WITHOUT_RESIGNATION =
+  'user_id,display_name,email,role,is_admin,leader_group,hire_date,invalid_call_count,participation_restricted_until,participation_restriction_note';
 
 const BIRTHDAY_SELECT =
   'id,title,start_date,description,birthday_calendar_type,birthday_is_intercalation';
@@ -189,10 +191,19 @@ async function requireAdmin(req: NextRequest): Promise<AdminContext | { error: N
 }
 
 async function readPeopleRows(sbAdmin: AdminContext['sbAdmin']) {
-  const { data: profiles, error: profileError } = await sbAdmin
+  let { data: profiles, error: profileError } = await sbAdmin
     .from('profiles')
     .select(PROFILE_SELECT)
     .order('display_name', { ascending: true });
+
+  if (isMissingResignationColumnError(profileError)) {
+    const fallback = await sbAdmin
+      .from('profiles')
+      .select(PROFILE_SELECT_WITHOUT_RESIGNATION)
+      .order('display_name', { ascending: true });
+    profiles = fallback.data as typeof profiles;
+    profileError = fallback.error;
+  }
 
   if (profileError) throw new Error(profileError.message);
 
@@ -209,7 +220,8 @@ async function readPeopleRows(sbAdmin: AdminContext['sbAdmin']) {
     if (email && !birthdayByEmail.has(email)) birthdayByEmail.set(email, event);
   }
 
-  return ((profiles ?? []) as ProfilePeopleRow[]).map<PeopleRow>((profile) => {
+  return ((profiles ?? []) as ProfilePeopleRow[]).map<PeopleRow>((rawProfile) => {
+    const profile = withResignationDefaults(rawProfile);
     const birthday = birthdayByEmail.get(normalizeEmail(profile.email));
     return {
       ...profile,
@@ -222,14 +234,24 @@ async function readPeopleRows(sbAdmin: AdminContext['sbAdmin']) {
 }
 
 async function readProfileByUserId(sbAdmin: AdminContext['sbAdmin'], userId: string) {
-  const { data, error } = await sbAdmin
+  let { data, error } = await sbAdmin
     .from('profiles')
     .select(PROFILE_SELECT)
     .eq('user_id', userId)
     .maybeSingle();
 
+  if (isMissingResignationColumnError(error)) {
+    const fallback = await sbAdmin
+      .from('profiles')
+      .select(PROFILE_SELECT_WITHOUT_RESIGNATION)
+      .eq('user_id', userId)
+      .maybeSingle();
+    data = fallback.data as typeof data;
+    error = fallback.error;
+  }
+
   if (error) throw new Error(error.message);
-  return (data as ProfilePeopleRow | null) ?? null;
+  return data ? withResignationDefaults(data as ProfilePeopleRow) : null;
 }
 
 function isAdminProfile(profile: Pick<ProfilePeopleRow, 'role' | 'is_admin'>) {
@@ -241,6 +263,40 @@ function readNoteField(value: unknown) {
   if (typeof value !== 'string') return undefined;
   const trimmed = value.trim();
   return trimmed || null;
+}
+
+function isMissingResignationColumnError(error: { message?: string; details?: string; hint?: string; code?: string } | null) {
+  const text = [error?.message, error?.details, error?.hint, error?.code].filter(Boolean).join(' ');
+  return /resigned_at|resignation_note/i.test(text) && /does not exist|could not find|schema cache|PGRST/i.test(text);
+}
+
+function withResignationDefaults(
+  profile: ProfilePeopleRow | (Omit<ProfilePeopleRow, 'resigned_at' | 'resignation_note'> & {
+    resigned_at?: string | null;
+    resignation_note?: string | null;
+  }),
+): ProfilePeopleRow {
+  return {
+    ...profile,
+    resigned_at: profile.resigned_at ?? null,
+    resignation_note: profile.resignation_note ?? null,
+  };
+}
+
+async function assertResignationColumnsAvailable(sbAdmin: AdminContext['sbAdmin']) {
+  const { error } = await sbAdmin.from('profiles').select('user_id,resigned_at,resignation_note').limit(1);
+  if (isMissingResignationColumnError(error)) {
+    return {
+      error: NextResponse.json(
+        { error: '퇴사처리 DB 컬럼이 아직 적용되지 않았습니다. Supabase migration을 먼저 적용해주세요.' },
+        { status: 503 },
+      ),
+    };
+  }
+  if (error) {
+    return { error: NextResponse.json({ error: error.message }, { status: 500 }) };
+  }
+  return {};
 }
 
 async function upsertBirthdayEvent(
@@ -395,8 +451,6 @@ export async function POST(req: NextRequest) {
       is_admin: false,
       leader_group: leaderGroup,
       hire_date: hireDate.value,
-      resigned_at: null,
-      resignation_note: null,
       invalid_call_count: 0,
       participation_restricted_until: null,
       participation_restriction_note: null,
@@ -446,6 +500,9 @@ export async function PATCH(req: NextRequest) {
 
     const action = typeof body.action === 'string' ? body.action.trim() : '';
     if (action === 'resign' || action === 'restore') {
+      const resignationColumns = await assertResignationColumnsAvailable(auth.sbAdmin);
+      if ('error' in resignationColumns) return resignationColumns.error;
+
       const currentProfile = await readProfileByUserId(auth.sbAdmin, userId);
       if (!currentProfile) {
         return NextResponse.json({ error: 'Profile not found' }, { status: 404 });
