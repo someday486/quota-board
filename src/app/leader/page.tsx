@@ -877,6 +877,9 @@ export default function LeaderPage() {
               width: isMobile ? '100%' : 'auto',
             }}
           >
+            <button onClick={() => router.push('/wiki')} style={{ ...btnOutline, ...(isMobile ? { width: '100%' } : {}) }}>
+              업무 위키
+            </button>
             <button onClick={() => router.push('/hr/calendar')} style={{ ...btnOutline, ...(isMobile ? { width: '100%' } : {}) }}>
               휴가신청
             </button>
@@ -1415,6 +1418,9 @@ export default function LeaderPage() {
               flexDirection: isMobile ? 'column' : 'row',
             }}
           >
+          <button onClick={() => router.push('/wiki')} style={{ ...btnOutline, ...(isMobile ? { width: '100%' } : {}) }}>
+            업무 위키
+          </button>
           <button onClick={() => router.push('/hr/calendar')} style={{ ...btnOutline, ...(isMobile ? { width: '100%' } : {}) }}>
             휴가신청
           </button>

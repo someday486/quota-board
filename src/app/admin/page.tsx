@@ -820,6 +820,7 @@ const handleToggleReviewed = async (applicationId: string, checked: boolean) => 
         note: 'admin_company_name_update',
       });
     }
+
     await loadApplies(); // 화면 즉시 반영
   };
 
@@ -1630,6 +1631,7 @@ const copyBoardAsImage = async () => {
           activePage="dashboard"
           onGoDashboard={() => router.push('/admin')}
           onGoPeople={() => router.push('/admin/people')}
+          onGoWiki={() => router.push('/wiki')}
           onGoHr={() => router.push('/hr/calendar')}
           onLogout={doLogout}
         />

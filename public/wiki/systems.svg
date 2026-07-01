@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360" viewBox="0 0 640 360" role="img" aria-labelledby="title desc">
+  <title id="title">System dashboard illustration</title>
+  <desc id="desc">A structured dashboard with a search bar and data rows.</desc>
+  <rect width="640" height="360" fill="#F8FAFC"/>
+  <rect x="54" y="46" width="532" height="268" rx="8" fill="#FFFFFF" stroke="#CBD5E1" stroke-width="2"/>
+  <rect x="54" y="46" width="532" height="54" rx="8" fill="#111827"/>
+  <rect x="86" y="68" width="126" height="10" rx="5" fill="#FFFFFF"/>
+  <rect x="412" y="64" width="120" height="18" rx="9" fill="#DBEAFE"/>
+  <rect x="86" y="128" width="172" height="152" rx="8" fill="#EFF6FF" stroke="#BFDBFE" stroke-width="2"/>
+  <rect x="286" y="128" width="268" height="42" rx="8" fill="#F1F5F9" stroke="#CBD5E1" stroke-width="2"/>
+  <rect x="310" y="145" width="120" height="8" rx="4" fill="#64748B"/>
+  <rect x="286" y="192" width="268" height="32" rx="8" fill="#FFFFFF" stroke="#E2E8F0" stroke-width="2"/>
+  <rect x="310" y="204" width="76" height="8" rx="4" fill="#2563EB"/>
+  <rect x="454" y="204" width="70" height="8" rx="4" fill="#94A3B8"/>
+  <rect x="286" y="244" width="268" height="32" rx="8" fill="#FFFFFF" stroke="#E2E8F0" stroke-width="2"/>
+  <rect x="310" y="256" width="98" height="8" rx="4" fill="#16A34A"/>
+  <rect x="454" y="256" width="70" height="8" rx="4" fill="#94A3B8"/>
+  <rect x="114" y="158" width="98" height="10" rx="5" fill="#1D4ED8"/>
+  <rect x="114" y="190" width="74" height="8" rx="4" fill="#64748B"/>
+  <rect x="114" y="216" width="98" height="8" rx="4" fill="#64748B"/>
+</svg>

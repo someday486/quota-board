@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360" viewBox="0 0 640 360" role="img" aria-labelledby="title desc">
+  <title id="title">Onboarding path illustration</title>
+  <desc id="desc">A clean workflow path with document panels and progress markers.</desc>
+  <rect width="640" height="360" fill="#F8FAFC"/>
+  <rect x="56" y="48" width="528" height="264" rx="8" fill="#FFFFFF" stroke="#CBD5E1" stroke-width="2"/>
+  <rect x="88" y="84" width="148" height="192" rx="8" fill="#EEF2FF" stroke="#C7D2FE" stroke-width="2"/>
+  <rect x="112" y="112" width="100" height="10" rx="5" fill="#3730A3"/>
+  <rect x="112" y="142" width="84" height="8" rx="4" fill="#64748B"/>
+  <rect x="112" y="166" width="94" height="8" rx="4" fill="#64748B"/>
+  <rect x="112" y="190" width="68" height="8" rx="4" fill="#64748B"/>
+  <path d="M258 180H382" stroke="#0F172A" stroke-width="8" stroke-linecap="round"/>
+  <path d="M365 160L386 180L365 200" fill="none" stroke="#0F172A" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="404" y="84" width="148" height="192" rx="8" fill="#ECFDF5" stroke="#86EFAC" stroke-width="2"/>
+  <rect x="432" y="112" width="92" height="10" rx="5" fill="#15803D"/>
+  <circle cx="450" cy="158" r="14" fill="#22C55E"/>
+  <circle cx="478" cy="196" r="14" fill="#2563EB"/>
+  <circle cx="506" cy="234" r="14" fill="#F59E0B"/>
+  <path d="M450 158L478 196L506 234" stroke="#0F172A" stroke-width="4" stroke-linecap="round"/>
+</svg>

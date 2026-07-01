@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360" viewBox="0 0 640 360" role="img" aria-labelledby="title desc">
+  <title id="title">Call script illustration</title>
+  <desc id="desc">A headset and script cards for telephone work.</desc>
+  <rect width="640" height="360" fill="#F8FAFC"/>
+  <rect x="56" y="48" width="528" height="264" rx="8" fill="#FFFFFF" stroke="#CBD5E1" stroke-width="2"/>
+  <path d="M178 205V164C178 119 215 84 260 84C305 84 342 119 342 164V205" fill="none" stroke="#0F172A" stroke-width="14" stroke-linecap="round"/>
+  <rect x="142" y="188" width="58" height="72" rx="8" fill="#DBEAFE" stroke="#2563EB" stroke-width="4"/>
+  <rect x="320" y="188" width="58" height="72" rx="8" fill="#DBEAFE" stroke="#2563EB" stroke-width="4"/>
+  <path d="M342 256C342 282 322 294 288 294" fill="none" stroke="#0F172A" stroke-width="8" stroke-linecap="round"/>
+  <rect x="402" y="96" width="132" height="166" rx="8" fill="#FFF7ED" stroke="#FDBA74" stroke-width="2"/>
+  <rect x="426" y="126" width="76" height="10" rx="5" fill="#C2410C"/>
+  <rect x="426" y="158" width="82" height="8" rx="4" fill="#64748B"/>
+  <rect x="426" y="184" width="62" height="8" rx="4" fill="#64748B"/>
+  <rect x="426" y="210" width="74" height="8" rx="4" fill="#64748B"/>
+  <rect x="98" y="92" width="84" height="38" rx="8" fill="#ECFDF5" stroke="#86EFAC" stroke-width="2"/>
+  <rect x="118" y="107" width="44" height="8" rx="4" fill="#15803D"/>
+</svg>

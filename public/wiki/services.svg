@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360" viewBox="0 0 640 360" role="img" aria-labelledby="title desc">
+  <title id="title">Service knowledge illustration</title>
+  <desc id="desc">A set of service cards connected to a central knowledge panel.</desc>
+  <rect width="640" height="360" fill="#F8FAFC"/>
+  <rect x="56" y="48" width="528" height="264" rx="8" fill="#FFFFFF" stroke="#CBD5E1" stroke-width="2"/>
+  <rect x="236" y="96" width="168" height="168" rx="8" fill="#EEF2FF" stroke="#A5B4FC" stroke-width="2"/>
+  <rect x="266" y="132" width="108" height="12" rx="6" fill="#3730A3"/>
+  <rect x="266" y="164" width="82" height="8" rx="4" fill="#64748B"/>
+  <rect x="266" y="190" width="108" height="8" rx="4" fill="#64748B"/>
+  <rect x="266" y="216" width="70" height="8" rx="4" fill="#64748B"/>
+  <rect x="92" y="98" width="100" height="72" rx="8" fill="#ECFDF5" stroke="#86EFAC" stroke-width="2"/>
+  <rect x="448" y="98" width="100" height="72" rx="8" fill="#FEF3C7" stroke="#FBBF24" stroke-width="2"/>
+  <rect x="92" y="196" width="100" height="72" rx="8" fill="#EFF6FF" stroke="#93C5FD" stroke-width="2"/>
+  <rect x="448" y="196" width="100" height="72" rx="8" fill="#FCE7F3" stroke="#F9A8D4" stroke-width="2"/>
+  <path d="M192 134H236M404 134H448M192 232H236M404 232H448" stroke="#334155" stroke-width="5" stroke-linecap="round"/>
+  <rect x="118" y="126" width="48" height="8" rx="4" fill="#15803D"/>
+  <rect x="474" y="126" width="48" height="8" rx="4" fill="#B45309"/>
+  <rect x="118" y="224" width="48" height="8" rx="4" fill="#1D4ED8"/>
+  <rect x="474" y="224" width="48" height="8" rx="4" fill="#BE185D"/>
+</svg>

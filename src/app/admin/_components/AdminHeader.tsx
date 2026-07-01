@@ -10,7 +10,8 @@ type AdminHeaderProps = {
   onLogout: () => void;
   onGoDashboard?: () => void;
   onGoPeople?: () => void;
-  activePage?: 'dashboard' | 'people';
+  onGoWiki?: () => void;
+  activePage?: 'dashboard' | 'people' | 'wiki';
 };
 
 export default function AdminHeader({
@@ -20,6 +21,7 @@ export default function AdminHeader({
   onLogout,
   onGoDashboard,
   onGoPeople,
+  onGoWiki,
   activePage = 'dashboard',
 }: AdminHeaderProps) {
   const isMobile = useIsMobile();
@@ -94,6 +96,11 @@ export default function AdminHeader({
         {onGoPeople && (
           <button onClick={onGoPeople} style={tabBtn(activePage === 'people')}>
             인원 관리
+          </button>
+        )}
+        {onGoWiki && (
+          <button onClick={onGoWiki} style={tabBtn(activePage === 'wiki')}>
+            업무 위키
           </button>
         )}
         <button onClick={onGoHr} style={{ ...ghostBtn, ...(isMobile ? { width: '100%' } : {}) }}>

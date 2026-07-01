@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360" viewBox="0 0 640 360" role="img" aria-labelledby="title desc">
+  <title id="title">Operating rules illustration</title>
+  <desc id="desc">A clipboard with checklist rows and a confirmation stamp.</desc>
+  <rect width="640" height="360" fill="#F8FAFC"/>
+  <rect x="56" y="48" width="528" height="264" rx="8" fill="#FFFFFF" stroke="#CBD5E1" stroke-width="2"/>
+  <rect x="190" y="72" width="260" height="228" rx="8" fill="#F8FAFC" stroke="#94A3B8" stroke-width="3"/>
+  <rect x="256" y="52" width="128" height="48" rx="8" fill="#111827"/>
+  <rect x="284" y="70" width="72" height="10" rx="5" fill="#FFFFFF"/>
+  <path d="M232 146L246 160L274 130" fill="none" stroke="#16A34A" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="302" y="142" width="96" height="9" rx="4.5" fill="#64748B"/>
+  <path d="M232 206L246 220L274 190" fill="none" stroke="#2563EB" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="302" y="202" width="112" height="9" rx="4.5" fill="#64748B"/>
+  <circle cx="490" cy="238" r="42" fill="#FEF2F2" stroke="#EF4444" stroke-width="5"/>
+  <path d="M470 238H510" stroke="#EF4444" stroke-width="8" stroke-linecap="round"/>
+</svg>
