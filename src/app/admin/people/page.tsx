@@ -6,6 +6,8 @@ import { supabase } from '@/lib/supabase';
 import AdminHeader from '../_components/AdminHeader';
 import { miniBtn, miniInput, rowBtn } from '../styles';
 
+type BirthdayCalendarType = 'solar' | 'lunar';
+
 type PeopleRow = {
   user_id: string;
   display_name: string | null;
@@ -13,6 +15,11 @@ type PeopleRow = {
   role: string | null;
   is_admin: boolean | null;
   leader_group: number | null;
+  hire_date: string | null;
+  birthday_event_id: string | null;
+  birthday_date: string | null;
+  birthday_calendar_type: BirthdayCalendarType;
+  birthday_is_intercalation: boolean;
   invalid_call_count: number | null;
   participation_restricted_until: string | null;
   participation_restriction_note: string | null;
@@ -28,6 +35,32 @@ type EditState = {
   invalidCallCount: string;
   restrictedUntil: string;
   note: string;
+  hireDate: string;
+  birthdayDate: string;
+  birthdayCalendarType: BirthdayCalendarType;
+  birthdayIsIntercalation: boolean;
+};
+
+type CreateState = {
+  email: string;
+  password: string;
+  displayName: string;
+  leaderGroup: '' | '1' | '2';
+  hireDate: string;
+  birthdayDate: string;
+  birthdayCalendarType: BirthdayCalendarType;
+  birthdayIsIntercalation: boolean;
+};
+
+const emptyCreateState: CreateState = {
+  email: '',
+  password: '',
+  displayName: '',
+  leaderGroup: '',
+  hireDate: '',
+  birthdayDate: '',
+  birthdayCalendarType: 'solar',
+  birthdayIsIntercalation: false,
 };
 
 const pad = (n: number) => String(n).padStart(2, '0');
@@ -52,6 +85,24 @@ function penaltyRuleLabel(count: number) {
   return '제한 없음';
 }
 
+function autoPasswordFromEmail(email: string) {
+  const local = email.trim().split('@')[0] ?? '';
+  return local ? local.toUpperCase() : '';
+}
+
+function sortPeopleRows(rows: PeopleRow[]) {
+  return [...rows].sort((a, b) => {
+    const an = a.display_name || a.email || a.user_id;
+    const bn = b.display_name || b.email || b.user_id;
+    return an.localeCompare(bn, 'ko');
+  });
+}
+
+async function responseError(res: Response, fallback: string) {
+  const json = (await res.json().catch(() => null)) as { error?: string } | null;
+  return json?.error || fallback;
+}
+
 export default function AdminPeoplePage() {
   const router = useRouter();
 
@@ -61,6 +112,8 @@ export default function AdminPeoplePage() {
   const [rows, setRows] = useState<PeopleRow[]>([]);
   const [edits, setEdits] = useState<Record<string, EditState>>({});
   const [busyUserId, setBusyUserId] = useState<string | null>(null);
+  const [createForm, setCreateForm] = useState<CreateState>(emptyCreateState);
+  const [busyCreate, setBusyCreate] = useState(false);
 
   const [query, setQuery] = useState('');
   const [restrictedOnly, setRestrictedOnly] = useState(false);
@@ -68,6 +121,7 @@ export default function AdminPeoplePage() {
   const [groupFilter, setGroupFilter] = useState<'all' | '1' | '2'>('all');
 
   const [errorMsg, setErrorMsg] = useState('');
+  const [successMsg, setSuccessMsg] = useState('');
 
   const todayLabel = useMemo(() => {
     try {
@@ -124,6 +178,10 @@ export default function AdminPeoplePage() {
         invalidCallCount: String(Number(r.invalid_call_count ?? 0)),
         restrictedUntil: toDatetimeLocalValue(r.participation_restricted_until),
         note: r.participation_restriction_note ?? '',
+        hireDate: r.hire_date ?? '',
+        birthdayDate: r.birthday_date ?? '',
+        birthdayCalendarType: r.birthday_calendar_type ?? 'solar',
+        birthdayIsIntercalation: Boolean(r.birthday_is_intercalation),
       };
     }
     setEdits(next);
@@ -143,20 +201,81 @@ export default function AdminPeoplePage() {
     setLoading(false);
 
     if (!res.ok) {
-      const text = await res.text().catch(() => '');
-      setErrorMsg(`인원 목록 조회 실패 (${res.status}) ${text}`);
+      setErrorMsg(`인원 목록 조회 실패: ${await responseError(res, String(res.status))}`);
       return;
     }
 
     const json = (await res.json()) as { rows?: PeopleRow[] };
-    const nextRows = json.rows ?? [];
+    const nextRows = sortPeopleRows(json.rows ?? []);
     setRows(nextRows);
     syncEdits(nextRows);
+  };
+
+  const createPerson = async () => {
+    setErrorMsg('');
+    setSuccessMsg('');
+
+    if (!createForm.email.trim()) {
+      setErrorMsg('아이디(이메일)를 입력해주세요.');
+      return;
+    }
+    if (!createForm.password.trim()) {
+      setErrorMsg('초기 비밀번호를 입력해주세요.');
+      return;
+    }
+    if (!createForm.displayName.trim()) {
+      setErrorMsg('이름을 입력해주세요.');
+      return;
+    }
+
+    const token = await getAccessToken();
+    if (!token) {
+      setErrorMsg('인증 토큰이 없습니다. 다시 로그인해주세요.');
+      return;
+    }
+
+    setBusyCreate(true);
+    const res = await fetch('/api/admin/people', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        email: createForm.email.trim(),
+        password: createForm.password.trim(),
+        display_name: createForm.displayName.trim(),
+        leader_group: createForm.leaderGroup || null,
+        hire_date: createForm.hireDate || null,
+        birthday_date: createForm.birthdayDate || null,
+        birthday_calendar_type: createForm.birthdayCalendarType,
+        birthday_is_intercalation: createForm.birthdayIsIntercalation,
+      }),
+    });
+    setBusyCreate(false);
+
+    if (!res.ok) {
+      setErrorMsg(`인원 등록 실패: ${await responseError(res, String(res.status))}`);
+      return;
+    }
+
+    const json = (await res.json()) as { row?: PeopleRow | null };
+    if (json.row) {
+      setRows((prev) => sortPeopleRows([...prev.filter((row) => row.user_id !== json.row!.user_id), json.row!]));
+      syncEdits(sortPeopleRows([...rows.filter((row) => row.user_id !== json.row!.user_id), json.row]));
+    } else {
+      await loadRows();
+    }
+    setCreateForm(emptyCreateState);
+    setSuccessMsg('신규 인원과 로그인 계정을 생성했습니다.');
   };
 
   const saveRow = async (userId: string) => {
     const edit = edits[userId];
     if (!edit) return;
+
+    setErrorMsg('');
+    setSuccessMsg('');
 
     const count = Number(edit.invalidCallCount);
     if (!Number.isInteger(count) || count < 0) {
@@ -190,28 +309,25 @@ export default function AdminPeoplePage() {
         invalid_call_count: count,
         participation_restricted_until: restrictedUntilIso,
         participation_restriction_note: edit.note.trim() || null,
+        hire_date: edit.hireDate || null,
+        birthday_date: edit.birthdayDate || null,
+        birthday_calendar_type: edit.birthdayCalendarType,
+        birthday_is_intercalation: edit.birthdayIsIntercalation,
       }),
     });
     setBusyUserId(null);
 
     if (!res.ok) {
-      const text = await res.text().catch(() => '');
-      setErrorMsg(`저장 실패 (${res.status}) ${text}`);
+      setErrorMsg(`저장 실패: ${await responseError(res, String(res.status))}`);
       return;
     }
 
     const json = (await res.json()) as { row: PeopleRow };
     const row = json.row;
-    setRows((prev) => prev.map((x) => (x.user_id === row.user_id ? row : x)));
-    setEdits((prev) => ({
-      ...prev,
-      [row.user_id]: {
-        invalidCallCount: String(Number(row.invalid_call_count ?? 0)),
-        restrictedUntil: toDatetimeLocalValue(row.participation_restricted_until),
-        note: row.participation_restriction_note ?? '',
-      },
-    }));
-    setErrorMsg('');
+    const nextRows = sortPeopleRows(rows.map((x) => (x.user_id === row.user_id ? row : x)));
+    setRows(nextRows);
+    syncEdits(nextRows);
+    setSuccessMsg('저장했습니다.');
   };
 
   useEffect(() => {
@@ -258,7 +374,7 @@ export default function AdminPeoplePage() {
 
   return (
     <main lang="ko-KR" style={{ padding: 28, background: '#f4f6fb', minHeight: '100vh', color: '#111827' }}>
-      <div style={{ maxWidth: 1250, margin: '0 auto' }}>
+      <div style={{ maxWidth: 1440, margin: '0 auto' }}>
         <AdminHeader
           adminName={adminName}
           todayLabel={todayLabel}
@@ -270,13 +386,112 @@ export default function AdminPeoplePage() {
         />
 
         <div style={cardBox}>
+          <div style={{ fontWeight: 900, fontSize: 16 }}>신규 인원 등록</div>
+          <div style={formGrid}>
+            <label style={fieldWrap}>
+              <span style={fieldLabel}>아이디(이메일)</span>
+              <input
+                value={createForm.email}
+                onChange={(e) => setCreateForm((prev) => ({ ...prev, email: e.target.value }))}
+                placeholder="name@company.com"
+                style={{ ...miniInput, height: 36 }}
+              />
+            </label>
+            <label style={fieldWrap}>
+              <span style={fieldLabel}>초기 비밀번호</span>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <input
+                  value={createForm.password}
+                  onChange={(e) => setCreateForm((prev) => ({ ...prev, password: e.target.value }))}
+                  style={{ ...miniInput, height: 36, flex: 1 }}
+                />
+                <button
+                  type="button"
+                  style={{ ...miniBtn, height: 36 }}
+                  onClick={() =>
+                    setCreateForm((prev) => ({ ...prev, password: autoPasswordFromEmail(prev.email) }))
+                  }
+                >
+                  자동
+                </button>
+              </div>
+            </label>
+            <label style={fieldWrap}>
+              <span style={fieldLabel}>이름</span>
+              <input
+                value={createForm.displayName}
+                onChange={(e) => setCreateForm((prev) => ({ ...prev, displayName: e.target.value }))}
+                style={{ ...miniInput, height: 36 }}
+              />
+            </label>
+            <label style={fieldWrap}>
+              <span style={fieldLabel}>조</span>
+              <select
+                value={createForm.leaderGroup}
+                onChange={(e) => setCreateForm((prev) => ({ ...prev, leaderGroup: e.target.value as '' | '1' | '2' }))}
+                style={{ ...miniInput, height: 36 }}
+              >
+                <option value="">미지정</option>
+                <option value="1">1조</option>
+                <option value="2">2조</option>
+              </select>
+            </label>
+            <label style={fieldWrap}>
+              <span style={fieldLabel}>입사일</span>
+              <input
+                type="date"
+                value={createForm.hireDate}
+                onChange={(e) => setCreateForm((prev) => ({ ...prev, hireDate: e.target.value }))}
+                style={{ ...miniInput, height: 36 }}
+              />
+            </label>
+            <label style={fieldWrap}>
+              <span style={fieldLabel}>생일</span>
+              <input
+                type="date"
+                value={createForm.birthdayDate}
+                onChange={(e) => setCreateForm((prev) => ({ ...prev, birthdayDate: e.target.value }))}
+                style={{ ...miniInput, height: 36 }}
+              />
+            </label>
+            <label style={fieldWrap}>
+              <span style={fieldLabel}>생일 기준</span>
+              <select
+                value={createForm.birthdayCalendarType}
+                onChange={(e) =>
+                  setCreateForm((prev) => ({ ...prev, birthdayCalendarType: e.target.value as BirthdayCalendarType }))
+                }
+                style={{ ...miniInput, height: 36 }}
+              >
+                <option value="solar">양력</option>
+                <option value="lunar">음력</option>
+              </select>
+            </label>
+            <label style={{ ...checkWrap, alignSelf: 'end' }}>
+              <input
+                type="checkbox"
+                checked={createForm.birthdayIsIntercalation}
+                onChange={(e) => setCreateForm((prev) => ({ ...prev, birthdayIsIntercalation: e.target.checked }))}
+                disabled={createForm.birthdayCalendarType !== 'lunar'}
+              />
+              윤달
+            </label>
+            <button
+              onClick={createPerson}
+              style={{ ...rowBtn, height: 36, alignSelf: 'end' }}
+              disabled={busyCreate}
+            >
+              {busyCreate ? '등록 중...' : '인원 등록'}
+            </button>
+          </div>
+        </div>
+
+        <div style={cardBox}>
           <div style={{ fontWeight: 900, fontSize: 16 }}>패널티 운영 기준</div>
           <div style={{ marginTop: 8, color: '#374151', fontSize: 14, lineHeight: 1.6 }}>
             무효콜 누적 3회 이상: 1주 참여 제한
             <br />
             무효콜 누적 5회 이상: 1개월 참여 제한
-            <br />
-            제한 종료 시각은 수동 입력값이 최종 적용됩니다.
           </div>
         </div>
 
@@ -299,8 +514,8 @@ export default function AdminPeoplePage() {
                 style={{ ...miniInput, width: 150, height: 36 }}
               >
                 <option value="all">무효콜 전체</option>
-                <option value="3plus">무효콜 3회+</option>
-                <option value="5plus">무효콜 5회+</option>
+                <option value="3plus">무효콜 3+</option>
+                <option value="5plus">무효콜 5+</option>
               </select>
               <label style={checkWrap}>
                 <input
@@ -323,15 +538,19 @@ export default function AdminPeoplePage() {
           </div>
 
           {errorMsg && <div style={errorBox}>{errorMsg}</div>}
+          {successMsg && <div style={successBox}>{successMsg}</div>}
 
           <div style={{ marginTop: 12, overflowX: 'auto' }}>
-            <table style={{ width: '100%', minWidth: 1160, borderCollapse: 'collapse' }}>
+            <table style={{ width: '100%', minWidth: 1560, borderCollapse: 'collapse' }}>
               <thead>
                 <tr style={{ borderBottom: '1px solid #e5e7eb', background: '#f8fafc' }}>
                   <th style={thCell}>이름</th>
                   <th style={thCell}>이메일</th>
                   <th style={thCell}>권한</th>
                   <th style={thCell}>조</th>
+                  <th style={thCell}>입사일</th>
+                  <th style={thCell}>생일</th>
+                  <th style={thCell}>생일 기준</th>
                   <th style={thCell}>무효콜 누적</th>
                   <th style={thCell}>규정 제재</th>
                   <th style={thCell}>참여 제한 종료</th>
@@ -342,7 +561,15 @@ export default function AdminPeoplePage() {
               </thead>
               <tbody>
                 {managedRows.map((r) => {
-                  const edit = edits[r.user_id] ?? { invalidCallCount: '0', restrictedUntil: '', note: '' };
+                  const edit = edits[r.user_id] ?? {
+                    invalidCallCount: '0',
+                    restrictedUntil: '',
+                    note: '',
+                    hireDate: '',
+                    birthdayDate: '',
+                    birthdayCalendarType: 'solar' as BirthdayCalendarType,
+                    birthdayIsIntercalation: false,
+                  };
                   const count = Number(edit.invalidCallCount || 0);
                   const restrictedDate = edit.restrictedUntil ? new Date(edit.restrictedUntil) : null;
                   const restricted = Boolean(
@@ -357,6 +584,68 @@ export default function AdminPeoplePage() {
                       <td style={tdCell}>{r.email ?? '-'}</td>
                       <td style={tdCell}>{r.role ?? '-'}</td>
                       <td style={tdCell}>{r.leader_group ?? '-'}</td>
+                      <td style={tdCell}>
+                        <input
+                          type="date"
+                          value={edit.hireDate}
+                          onChange={(e) =>
+                            setEdits((prev) => ({
+                              ...prev,
+                              [r.user_id]: { ...edit, hireDate: e.target.value },
+                            }))
+                          }
+                          style={{ ...miniInput, width: 132 }}
+                        />
+                      </td>
+                      <td style={tdCell}>
+                        <input
+                          type="date"
+                          value={edit.birthdayDate}
+                          onChange={(e) =>
+                            setEdits((prev) => ({
+                              ...prev,
+                              [r.user_id]: { ...edit, birthdayDate: e.target.value },
+                            }))
+                          }
+                          style={{ ...miniInput, width: 132 }}
+                        />
+                      </td>
+                      <td style={tdCell}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <select
+                            value={edit.birthdayCalendarType}
+                            onChange={(e) =>
+                              setEdits((prev) => ({
+                                ...prev,
+                                [r.user_id]: {
+                                  ...edit,
+                                  birthdayCalendarType: e.target.value as BirthdayCalendarType,
+                                  birthdayIsIntercalation:
+                                    e.target.value === 'lunar' ? edit.birthdayIsIntercalation : false,
+                                },
+                              }))
+                            }
+                            style={{ ...miniInput, width: 78 }}
+                          >
+                            <option value="solar">양력</option>
+                            <option value="lunar">음력</option>
+                          </select>
+                          <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontWeight: 800 }}>
+                            <input
+                              type="checkbox"
+                              checked={edit.birthdayIsIntercalation}
+                              disabled={edit.birthdayCalendarType !== 'lunar'}
+                              onChange={(e) =>
+                                setEdits((prev) => ({
+                                  ...prev,
+                                  [r.user_id]: { ...edit, birthdayIsIntercalation: e.target.checked },
+                                }))
+                              }
+                            />
+                            윤달
+                          </label>
+                        </div>
+                      </td>
                       <td style={tdCell}>
                         <input
                           type="number"
@@ -431,7 +720,7 @@ export default function AdminPeoplePage() {
 
                 {managedRows.length === 0 && (
                   <tr>
-                    <td colSpan={10} style={{ textAlign: 'center', padding: 18, color: '#6b7280' }}>
+                    <td colSpan={13} style={{ textAlign: 'center', padding: 18, color: '#6b7280' }}>
                       표시할 인원이 없습니다.
                     </td>
                   </tr>
@@ -454,11 +743,42 @@ const cardBox: CSSProperties = {
   boxShadow: '0 10px 30px rgba(17, 24, 39, 0.05)',
 };
 
+const formGrid: CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+  gap: 10,
+  marginTop: 12,
+  alignItems: 'start',
+};
+
+const fieldWrap: CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 5,
+  minWidth: 0,
+};
+
+const fieldLabel: CSSProperties = {
+  fontSize: 12,
+  fontWeight: 900,
+  color: '#475569',
+};
+
 const errorBox: CSSProperties = {
   marginTop: 10,
   border: '1px solid #fecaca',
   background: '#fff1f2',
   color: '#9f1239',
+  borderRadius: 10,
+  padding: '8px 10px',
+  fontWeight: 700,
+};
+
+const successBox: CSSProperties = {
+  marginTop: 10,
+  border: '1px solid #bbf7d0',
+  background: '#f0fdf4',
+  color: '#166534',
   borderRadius: 10,
   padding: '8px 10px',
   fontWeight: 700,
