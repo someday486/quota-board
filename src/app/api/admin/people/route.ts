@@ -9,6 +9,8 @@ type ProfilePeopleRow = {
   is_admin: boolean | null;
   leader_group: number | null;
   hire_date: string | null;
+  resigned_at: string | null;
+  resignation_note: string | null;
   invalid_call_count: number | null;
   participation_restricted_until: string | null;
   participation_restriction_note: string | null;
@@ -80,10 +82,12 @@ type AdminContext = {
 };
 
 const PROFILE_SELECT =
-  'user_id,display_name,email,role,is_admin,leader_group,hire_date,invalid_call_count,participation_restricted_until,participation_restriction_note';
+  'user_id,display_name,email,role,is_admin,leader_group,hire_date,resigned_at,resignation_note,invalid_call_count,participation_restricted_until,participation_restriction_note';
 
 const BIRTHDAY_SELECT =
   'id,title,start_date,description,birthday_calendar_type,birthday_is_intercalation';
+
+const RESIGNED_AUTH_BAN_DURATION = '876000h';
 
 function getBearerToken(req: NextRequest) {
   const authz = req.headers.get('authorization') || '';
@@ -215,6 +219,28 @@ async function readPeopleRows(sbAdmin: AdminContext['sbAdmin']) {
       birthday_is_intercalation: Boolean(birthday?.birthday_is_intercalation),
     };
   });
+}
+
+async function readProfileByUserId(sbAdmin: AdminContext['sbAdmin'], userId: string) {
+  const { data, error } = await sbAdmin
+    .from('profiles')
+    .select(PROFILE_SELECT)
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (error) throw new Error(error.message);
+  return (data as ProfilePeopleRow | null) ?? null;
+}
+
+function isAdminProfile(profile: Pick<ProfilePeopleRow, 'role' | 'is_admin'>) {
+  return profile.role === 'admin' || Boolean(profile.is_admin);
+}
+
+function readNoteField(value: unknown) {
+  if (value === null || value === undefined || value === '') return null;
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  return trimmed || null;
 }
 
 async function upsertBirthdayEvent(
@@ -369,6 +395,8 @@ export async function POST(req: NextRequest) {
       is_admin: false,
       leader_group: leaderGroup,
       hire_date: hireDate.value,
+      resigned_at: null,
+      resignation_note: null,
       invalid_call_count: 0,
       participation_restricted_until: null,
       participation_restriction_note: null,
@@ -414,6 +442,97 @@ export async function PATCH(req: NextRequest) {
     const userId = typeof body?.user_id === 'string' ? body.user_id.trim() : '';
     if (!userId) {
       return NextResponse.json({ error: 'user_id is required' }, { status: 400 });
+    }
+
+    const action = typeof body.action === 'string' ? body.action.trim() : '';
+    if (action === 'resign' || action === 'restore') {
+      const currentProfile = await readProfileByUserId(auth.sbAdmin, userId);
+      if (!currentProfile) {
+        return NextResponse.json({ error: 'Profile not found' }, { status: 404 });
+      }
+      if (isAdminProfile(currentProfile)) {
+        return NextResponse.json({ error: 'Admin accounts cannot be resigned here' }, { status: 400 });
+      }
+
+      if (action === 'resign') {
+        const resignedAt = readDateField(body, 'resigned_at');
+        const resignationNote = readNoteField(body.resignation_note);
+        if ('error' in resignedAt) {
+          return NextResponse.json({ error: resignedAt.error }, { status: 400 });
+        }
+        if (!resignedAt.value) {
+          return NextResponse.json({ error: 'resigned_at is required' }, { status: 400 });
+        }
+        if (resignationNote === undefined) {
+          return NextResponse.json({ error: 'resignation_note must be a string or null' }, { status: 400 });
+        }
+
+        const { error: banError } = await auth.sbAdmin.auth.admin.updateUserById(userId, {
+          ban_duration: RESIGNED_AUTH_BAN_DURATION,
+        });
+        if (banError) {
+          return NextResponse.json({ error: `Failed to disable auth user: ${banError.message}` }, { status: 500 });
+        }
+
+        const { data: profile, error } = await auth.sbAdmin
+          .from('profiles')
+          .update({
+            role: 'resigned',
+            leader_group: null,
+            resigned_at: resignedAt.value,
+            resignation_note: resignationNote,
+            participation_restricted_until: null,
+            participation_restriction_note: null,
+          })
+          .eq('user_id', userId)
+          .select(PROFILE_SELECT)
+          .maybeSingle();
+
+        if (error || !profile) {
+          await auth.sbAdmin.auth.admin.updateUserById(userId, { ban_duration: 'none' });
+          return NextResponse.json({ error: error?.message || 'Profile not found' }, { status: error ? 500 : 404 });
+        }
+
+        await upsertBirthdayEvent(auth.sbAdmin, profile as ProfilePeopleRow, null, 'solar', false, auth.actorUserId);
+      } else {
+        const { error: unbanError } = await auth.sbAdmin.auth.admin.updateUserById(userId, {
+          ban_duration: 'none',
+        });
+        if (unbanError) {
+          return NextResponse.json({ error: `Failed to restore auth user: ${unbanError.message}` }, { status: 500 });
+        }
+
+        const { error } = await auth.sbAdmin
+          .from('profiles')
+          .update({
+            role: 'leader',
+            resigned_at: null,
+            resignation_note: null,
+          })
+          .eq('user_id', userId);
+
+        if (error) {
+          return NextResponse.json({ error: error.message }, { status: 500 });
+        }
+      }
+
+      const rows = await readPeopleRows(auth.sbAdmin);
+      const row = rows.find((item) => item.user_id === userId) ?? null;
+      if (!row) {
+        return NextResponse.json({ error: 'Profile not found' }, { status: 404 });
+      }
+      return NextResponse.json({ row });
+    }
+
+    const currentProfile = await readProfileByUserId(auth.sbAdmin, userId);
+    if (!currentProfile) {
+      return NextResponse.json({ error: 'Profile not found' }, { status: 404 });
+    }
+    if (currentProfile.role === 'resigned' || currentProfile.resigned_at) {
+      return NextResponse.json(
+        { error: 'Resigned profiles can only use resign or restore actions' },
+        { status: 400 },
+      );
     }
 
     const payload: Record<string, unknown> = {};

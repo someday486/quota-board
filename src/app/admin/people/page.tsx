@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import AdminHeader from '../_components/AdminHeader';
-import { miniBtn, miniInput, rowBtn } from '../styles';
+import { dangerMiniBtn, miniBtn, miniInput, rowBtn } from '../styles';
 
 type BirthdayCalendarType = 'solar' | 'lunar';
 
@@ -16,6 +16,8 @@ type PeopleRow = {
   is_admin: boolean | null;
   leader_group: number | null;
   hire_date: string | null;
+  resigned_at: string | null;
+  resignation_note: string | null;
   birthday_event_id: string | null;
   birthday_date: string | null;
   birthday_calendar_type: BirthdayCalendarType;
@@ -36,6 +38,8 @@ type EditState = {
   restrictedUntil: string;
   note: string;
   hireDate: string;
+  resignedAt: string;
+  resignationNote: string;
   birthdayDate: string;
   birthdayCalendarType: BirthdayCalendarType;
   birthdayIsIntercalation: boolean;
@@ -90,6 +94,15 @@ function autoPasswordFromEmail(email: string) {
   return local ? local.toUpperCase() : '';
 }
 
+function todayDateInputValue() {
+  const d = new Date();
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+function isResigned(row: PeopleRow) {
+  return row.role === 'resigned' || Boolean(row.resigned_at);
+}
+
 function sortPeopleRows(rows: PeopleRow[]) {
   return [...rows].sort((a, b) => {
     const an = a.display_name || a.email || a.user_id;
@@ -119,6 +132,7 @@ export default function AdminPeoplePage() {
   const [restrictedOnly, setRestrictedOnly] = useState(false);
   const [penaltyFilter, setPenaltyFilter] = useState<'all' | '3plus' | '5plus'>('all');
   const [groupFilter, setGroupFilter] = useState<'all' | '1' | '2'>('all');
+  const [employmentFilter, setEmploymentFilter] = useState<'active' | 'resigned' | 'all'>('active');
 
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
@@ -140,6 +154,12 @@ export default function AdminPeoplePage() {
     const q = query.trim().toLowerCase();
     return rows
       .filter((r) => !(r.role === 'admin' || r.is_admin))
+      .filter((r) => {
+        const resigned = isResigned(r);
+        if (employmentFilter === 'active') return !resigned;
+        if (employmentFilter === 'resigned') return resigned;
+        return true;
+      })
       .filter((r) => (groupFilter === 'all' ? true : String(r.leader_group ?? '') === groupFilter))
       .filter((r) => {
         const c = Number(r.invalid_call_count ?? 0);
@@ -154,7 +174,7 @@ export default function AdminPeoplePage() {
         const email = (r.email ?? '').toLowerCase();
         return name.includes(q) || email.includes(q);
       });
-  }, [rows, query, restrictedOnly, penaltyFilter, groupFilter]);
+  }, [rows, query, restrictedOnly, penaltyFilter, groupFilter, employmentFilter]);
 
   const doLogout = async () => {
     await supabase.auth.signOut();
@@ -179,6 +199,8 @@ export default function AdminPeoplePage() {
         restrictedUntil: toDatetimeLocalValue(r.participation_restricted_until),
         note: r.participation_restriction_note ?? '',
         hireDate: r.hire_date ?? '',
+        resignedAt: r.resigned_at ?? '',
+        resignationNote: r.resignation_note ?? '',
         birthdayDate: r.birthday_date ?? '',
         birthdayCalendarType: r.birthday_calendar_type ?? 'solar',
         birthdayIsIntercalation: Boolean(r.birthday_is_intercalation),
@@ -273,9 +295,15 @@ export default function AdminPeoplePage() {
   const saveRow = async (userId: string) => {
     const edit = edits[userId];
     if (!edit) return;
+    const targetRow = rows.find((item) => item.user_id === userId);
 
     setErrorMsg('');
     setSuccessMsg('');
+
+    if (targetRow && isResigned(targetRow)) {
+      setErrorMsg('퇴사자는 퇴사정보 저장 또는 복구만 사용할 수 있습니다.');
+      return;
+    }
 
     const count = Number(edit.invalidCallCount);
     if (!Number.isInteger(count) || count < 0) {
@@ -328,6 +356,71 @@ export default function AdminPeoplePage() {
     setRows(nextRows);
     syncEdits(nextRows);
     setSuccessMsg('저장했습니다.');
+  };
+
+  const processEmployment = async (userId: string, action: 'resign' | 'restore') => {
+    const row = rows.find((item) => item.user_id === userId);
+    const edit = edits[userId];
+    if (!row || !edit) return;
+
+    setErrorMsg('');
+    setSuccessMsg('');
+
+    const resignedAt = edit.resignedAt || todayDateInputValue();
+    const name = row.display_name || row.email || '선택한 인원';
+    const alreadyResigned = isResigned(row);
+
+    if (action === 'resign') {
+      const ok = window.confirm(
+        alreadyResigned
+          ? `${name}님의 퇴사 정보를 저장할까요?\n로그인 차단 상태는 유지됩니다.`
+          : `${name}님을 퇴사 처리할까요?\n로그인 계정도 비활성화됩니다.`,
+      );
+      if (!ok) return;
+    } else {
+      const ok = window.confirm(`${name}님을 재직 상태로 복구할까요?\n로그인 차단도 해제됩니다.`);
+      if (!ok) return;
+    }
+
+    const token = await getAccessToken();
+    if (!token) {
+      setErrorMsg('인증 토큰이 없습니다. 다시 로그인해주세요.');
+      return;
+    }
+
+    setBusyUserId(userId);
+    const res = await fetch('/api/admin/people', {
+      method: 'PATCH',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(
+        action === 'resign'
+          ? {
+              user_id: userId,
+              action,
+              resigned_at: resignedAt,
+              resignation_note: edit.resignationNote.trim() || null,
+            }
+          : {
+              user_id: userId,
+              action,
+            },
+      ),
+    });
+    setBusyUserId(null);
+
+    if (!res.ok) {
+      setErrorMsg(`${action === 'resign' ? '퇴사 처리' : '복구'} 실패: ${await responseError(res, String(res.status))}`);
+      return;
+    }
+
+    const json = (await res.json()) as { row: PeopleRow };
+    const nextRows = sortPeopleRows(rows.map((x) => (x.user_id === json.row.user_id ? json.row : x)));
+    setRows(nextRows);
+    syncEdits(nextRows);
+    setSuccessMsg(action === 'resign' ? '퇴사 처리했습니다.' : '재직 상태로 복구했습니다.');
   };
 
   useEffect(() => {
@@ -510,6 +603,15 @@ export default function AdminPeoplePage() {
                 <option value="2">2조</option>
               </select>
               <select
+                value={employmentFilter}
+                onChange={(e) => setEmploymentFilter(e.target.value as 'active' | 'resigned' | 'all')}
+                style={{ ...miniInput, width: 120, height: 36 }}
+              >
+                <option value="active">재직자</option>
+                <option value="resigned">퇴사자</option>
+                <option value="all">전체 상태</option>
+              </select>
+              <select
                 value={penaltyFilter}
                 onChange={(e) => setPenaltyFilter(e.target.value as 'all' | '3plus' | '5plus')}
                 style={{ ...miniInput, width: 150, height: 36 }}
@@ -542,14 +644,17 @@ export default function AdminPeoplePage() {
           {successMsg && <div style={successBox}>{successMsg}</div>}
 
           <div style={{ marginTop: 12, overflowX: 'auto' }}>
-            <table style={{ width: '100%', minWidth: 1560, borderCollapse: 'collapse' }}>
+            <table style={{ width: '100%', minWidth: 1920, borderCollapse: 'collapse' }}>
               <thead>
                 <tr style={{ borderBottom: '1px solid #e5e7eb', background: '#f8fafc' }}>
                   <th style={thCell}>이름</th>
                   <th style={thCell}>이메일</th>
                   <th style={thCell}>권한</th>
+                  <th style={thCell}>재직 상태</th>
                   <th style={thCell}>조</th>
                   <th style={thCell}>입사일</th>
+                  <th style={thCell}>퇴사일</th>
+                  <th style={thCell}>퇴사 메모</th>
                   <th style={thCell}>생일</th>
                   <th style={thCell}>생일 기준</th>
                   <th style={thCell}>무효콜 누적</th>
@@ -557,6 +662,7 @@ export default function AdminPeoplePage() {
                   <th style={thCell}>참여 제한 종료</th>
                   <th style={thCell}>사유</th>
                   <th style={thCell}>현재 상태</th>
+                  <th style={thCell}>퇴사처리</th>
                   <th style={thCell}>저장</th>
                 </tr>
               </thead>
@@ -570,8 +676,11 @@ export default function AdminPeoplePage() {
                     birthdayDate: '',
                     birthdayCalendarType: 'solar' as BirthdayCalendarType,
                     birthdayIsIntercalation: false,
+                    resignedAt: '',
+                    resignationNote: '',
                   };
                   const count = Number(edit.invalidCallCount || 0);
+                  const resigned = isResigned(r);
                   const restrictedDate = edit.restrictedUntil ? new Date(edit.restrictedUntil) : null;
                   const restricted = Boolean(
                     restrictedDate &&
@@ -584,6 +693,11 @@ export default function AdminPeoplePage() {
                       <td style={tdCell}>{r.display_name ?? '-'}</td>
                       <td style={tdCell}>{r.email ?? '-'}</td>
                       <td style={tdCell}>{r.role ?? '-'}</td>
+                      <td style={tdCell}>
+                        <span style={resigned ? badgeResigned : badgeNormal}>
+                          {resigned ? '퇴사' : '재직'}
+                        </span>
+                      </td>
                       <td style={tdCell}>{r.leader_group ?? '-'}</td>
                       <td style={tdCell}>
                         <input
@@ -596,6 +710,32 @@ export default function AdminPeoplePage() {
                             }))
                           }
                           style={{ ...miniInput, width: 132 }}
+                        />
+                      </td>
+                      <td style={tdCell}>
+                        <input
+                          type="date"
+                          value={edit.resignedAt}
+                          onChange={(e) =>
+                            setEdits((prev) => ({
+                              ...prev,
+                              [r.user_id]: { ...edit, resignedAt: e.target.value },
+                            }))
+                          }
+                          style={{ ...miniInput, width: 132 }}
+                        />
+                      </td>
+                      <td style={tdCell}>
+                        <input
+                          value={edit.resignationNote}
+                          onChange={(e) =>
+                            setEdits((prev) => ({
+                              ...prev,
+                              [r.user_id]: { ...edit, resignationNote: e.target.value },
+                            }))
+                          }
+                          placeholder="퇴사 메모"
+                          style={{ ...miniInput, width: 180 }}
                         />
                       </td>
                       <td style={tdCell}>
@@ -711,8 +851,34 @@ export default function AdminPeoplePage() {
                         </span>
                       </td>
                       <td style={tdCell}>
-                        <button onClick={() => saveRow(r.user_id)} style={rowBtn} disabled={busyUserId === r.user_id}>
-                          {busyUserId === r.user_id ? '저장 중...' : '저장'}
+                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                          <button
+                            type="button"
+                            onClick={() => processEmployment(r.user_id, 'resign')}
+                            style={dangerMiniBtn}
+                            disabled={busyUserId === r.user_id}
+                          >
+                            {resigned ? '퇴사정보 저장' : '퇴사처리'}
+                          </button>
+                          {resigned && (
+                            <button
+                              type="button"
+                              onClick={() => processEmployment(r.user_id, 'restore')}
+                              style={miniBtn}
+                              disabled={busyUserId === r.user_id}
+                            >
+                              복구
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                      <td style={tdCell}>
+                        <button
+                          onClick={() => saveRow(r.user_id)}
+                          style={rowBtn}
+                          disabled={busyUserId === r.user_id || resigned}
+                        >
+                          {resigned ? '퇴사자' : busyUserId === r.user_id ? '저장 중...' : '저장'}
                         </button>
                       </td>
                     </tr>
@@ -721,7 +887,7 @@ export default function AdminPeoplePage() {
 
                 {managedRows.length === 0 && (
                   <tr>
-                    <td colSpan={13} style={{ textAlign: 'center', padding: 18, color: '#6b7280' }}>
+                    <td colSpan={17} style={{ textAlign: 'center', padding: 18, color: '#6b7280' }}>
                       표시할 인원이 없습니다.
                     </td>
                   </tr>
@@ -835,4 +1001,11 @@ const badgeNormal: CSSProperties = {
   border: '1px solid #c7f0d2',
   background: '#ecfdf3',
   color: '#166534',
+};
+
+const badgeResigned: CSSProperties = {
+  ...badgeBase,
+  border: '1px solid #cbd5e1',
+  background: '#f8fafc',
+  color: '#475569',
 };

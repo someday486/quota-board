@@ -59,7 +59,8 @@ type AdminBalanceRow = {
 type AdminUserRow = {
   user_id: string;
   display_name: string;
-  role: string;
+  role: string | null;
+  is_admin?: boolean | null;
 };
 
 type WeeklyRow = {
@@ -685,7 +686,7 @@ export default function Page() {
   async function fetchAdminUsers() {
     const { data, error } = await supabase
       .from('profiles')
-      .select('user_id,display_name,role')
+      .select('user_id,display_name,role,is_admin')
       .order('display_name', { ascending: true });
 
     if (error) {
@@ -694,7 +695,7 @@ export default function Page() {
       return;
     }
 
-    setAdminUsers((data ?? []) as AdminUserRow[]);
+    setAdminUsers(((data ?? []) as AdminUserRow[]).filter((user) => user.role !== 'resigned'));
   }
 
   async function fetchWeeklyLeaves(key: string) {
@@ -1847,7 +1848,7 @@ ${txt}`);
                     {adminUsers.map((u) => (
                       <option key={u.user_id} value={u.user_id}>
                         {u.display_name || u.user_id}
-                        {u.role === 'admin' ? ' (관리자)' : ''}
+                        {u.role === 'admin' || u.is_admin ? ' (관리자)' : ''}
                       </option>
                     ))}
                   </select>

@@ -1044,11 +1044,12 @@ const handleToggleReviewed = async (applicationId: string, checked: boolean) => 
   };
 
 const loadLeaders = async () => {
-    // 팀장 목록: profiles에서 is_admin=false 기준
+    // 팀장 목록: 퇴사 처리되지 않은 팀장 계정만 표시
     const { data, error } = await supabase
       .from('profiles')
       .select('user_id, display_name, role, is_admin, leader_group')
       .eq('is_admin', false)
+      .eq('role', 'leader')
       .order('display_name', { ascending: true });
 
     if (error) {
@@ -2052,7 +2053,7 @@ const copyBoardAsImage = async () => {
 
               {leaderDashRows.length === 0 && (
                 <div style={{ gridColumn: '1 / -1', padding: 10, color: '#666', textAlign: 'center' }}>
-                  팀장 목록이 없습니다. (profiles.is_admin=false 확인)
+                  팀장 목록이 없습니다. (profiles.role=leader 확인)
                 </div>
               )}
             </div>
