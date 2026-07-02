@@ -687,6 +687,7 @@ export default function Page() {
     const { data, error } = await supabase
       .from('profiles')
       .select('user_id,display_name,role,is_admin')
+      .is('resigned_at', null)
       .order('display_name', { ascending: true });
 
     if (error) {
@@ -695,7 +696,7 @@ export default function Page() {
       return;
     }
 
-    setAdminUsers(((data ?? []) as AdminUserRow[]).filter((user) => user.role !== 'resigned'));
+    setAdminUsers((data ?? []) as AdminUserRow[]);
   }
 
   async function fetchWeeklyLeaves(key: string) {

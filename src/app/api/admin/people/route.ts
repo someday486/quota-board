@@ -534,7 +534,6 @@ export async function PATCH(req: NextRequest) {
         const { data: profile, error } = await auth.sbAdmin
           .from('profiles')
           .update({
-            role: 'resigned',
             leader_group: null,
             resigned_at: resignedAt.value,
             resignation_note: resignationNote,
@@ -562,7 +561,6 @@ export async function PATCH(req: NextRequest) {
         const { error } = await auth.sbAdmin
           .from('profiles')
           .update({
-            role: 'leader',
             resigned_at: null,
             resignation_note: null,
           })
@@ -585,7 +583,7 @@ export async function PATCH(req: NextRequest) {
     if (!currentProfile) {
       return NextResponse.json({ error: 'Profile not found' }, { status: 404 });
     }
-    if (currentProfile.role === 'resigned' || currentProfile.resigned_at) {
+    if (currentProfile.resigned_at) {
       return NextResponse.json(
         { error: 'Resigned profiles can only use resign or restore actions' },
         { status: 400 },

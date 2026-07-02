@@ -100,7 +100,7 @@ function todayDateInputValue() {
 }
 
 function isResigned(row: PeopleRow) {
-  return row.role === 'resigned' || Boolean(row.resigned_at);
+  return Boolean(row.resigned_at);
 }
 
 function sortPeopleRows(rows: PeopleRow[]) {

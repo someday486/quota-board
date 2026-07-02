@@ -1050,6 +1050,7 @@ const loadLeaders = async () => {
       .select('user_id, display_name, role, is_admin, leader_group')
       .eq('is_admin', false)
       .eq('role', 'leader')
+      .is('resigned_at', null)
       .order('display_name', { ascending: true });
 
     if (error) {
