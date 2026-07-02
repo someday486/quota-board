@@ -33,7 +33,13 @@ function pageSearchText(page: WikiPage) {
     )
     .join(' ');
 
-  return [page.title, page.summary, page.audience, page.tags.join(' '), page.sourceFiles.join(' '), blockText].join(' ').toLowerCase();
+  const externalLinkText = page.externalLinks
+    ?.map((link) => [link.label, link.description ?? '', link.url].join(' '))
+    .join(' ');
+
+  return [page.title, page.summary, page.audience, page.tags.join(' '), page.sourceFiles.join(' '), externalLinkText ?? '', blockText]
+    .join(' ')
+    .toLowerCase();
 }
 
 export default function WikiClient({ categories, pages }: WikiClientProps) {
@@ -67,6 +73,7 @@ export default function WikiClient({ categories, pages }: WikiClientProps) {
   const relatedPages = activePage?.relatedPageIds
     ?.map((id) => pages.find((page) => page.id === id))
     .filter((page): page is WikiPage => Boolean(page));
+  const externalLinks = activePage?.externalLinks ?? [];
 
   return (
     <main className={styles.page} lang="ko-KR">
@@ -257,16 +264,33 @@ export default function WikiClient({ categories, pages }: WikiClientProps) {
                 ))}
               </div>
 
-              {relatedPages && relatedPages.length > 0 ? (
+              {(relatedPages && relatedPages.length > 0) || externalLinks.length > 0 ? (
                 <section className={styles.related} aria-label="관련 문서">
-                  <h3>관련 문서</h3>
-                  <div>
-                    {relatedPages.map((page) => (
-                      <button key={page.id} type="button" onClick={() => setActivePageId(page.id)}>
-                        {page.title}
-                      </button>
-                    ))}
-                  </div>
+                  {relatedPages && relatedPages.length > 0 ? (
+                    <>
+                      <h3>관련 문서</h3>
+                      <div className={styles.relatedList}>
+                        {relatedPages.map((page) => (
+                          <button key={page.id} type="button" onClick={() => setActivePageId(page.id)}>
+                            {page.title}
+                          </button>
+                        ))}
+                      </div>
+                    </>
+                  ) : null}
+                  {externalLinks.length > 0 ? (
+                    <>
+                      <h3 className={styles.externalTitle}>외부 참고 링크</h3>
+                      <div className={styles.externalLinkList}>
+                        {externalLinks.map((link) => (
+                          <a key={link.url} href={link.url} target="_blank" rel="noreferrer" className={styles.externalLink}>
+                            <strong>{link.label}</strong>
+                            {link.description ? <span>{link.description}</span> : null}
+                          </a>
+                        ))}
+                      </div>
+                    </>
+                  ) : null}
                 </section>
               ) : null}
             </article>

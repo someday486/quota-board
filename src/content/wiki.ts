@@ -6,6 +6,12 @@ export type WikiCategory = {
   description: string;
 };
 
+export type WikiExternalLink = {
+  label: string;
+  url: string;
+  description?: string;
+};
+
 export type WikiBlock = {
   heading: string;
   paragraphs?: string[];
@@ -27,6 +33,7 @@ export type WikiPage = {
   audience: string;
   tags: string[];
   sourceFiles: string[];
+  externalLinks?: WikiExternalLink[];
   blocks: WikiBlock[];
   relatedPageIds?: string[];
 };
@@ -1121,6 +1128,18 @@ export const wikiPages: WikiPage[] = [
     audience: '상담자, 교육 담당자',
     tags: ['상속세', '법인자금', '종신보험', '승계', '자사주'],
     sourceFiles: ['1탄_법인자금 활용 상속세 재원마련 플랜 브로셔.pptx', '업무메뉴얼_MEGAINFO_수정2(26.06.01).pptx'],
+    externalLinks: [
+      {
+        label: '국세청 상속세 신고납부기한',
+        url: 'https://www.nts.go.kr/nts/cm/cntnts/cntntsView.do?cntntsId=7719&mi=2325',
+        description: '상속세 신고·납부기한과 제출서류 확인',
+      },
+      {
+        label: '국세청 상속세 납부',
+        url: 'https://www.nts.go.kr/nts/cm/cntnts/cntntsView.do?cntntsId=7724&mi=2331',
+        description: '분납, 연부연납 등 납부 방법 확인',
+      },
+    ],
     blocks: [
       {
         heading: '핵심 설명',
@@ -1147,6 +1166,19 @@ export const wikiPages: WikiPage[] = [
           '대표 개인계약과 법인계약은 상속재산 포함 여부와 세무 효과가 달라질 수 있습니다.',
         ],
       },
+      {
+        heading: '공식 확인처와 최신 확인 기준',
+        table: {
+          headers: ['확인 항목', '공식 확인처', '상담 전 체크'],
+          rows: [
+            ['상속세 신고기한', '국세청 상속세 신고납부기한 안내', '일반적으로 상속개시일이 속하는 달의 말일부터 6개월 이내 신고·납부 대상인지 확인합니다.'],
+            ['분납/연부연납', '국세청 상속세 납부 안내', '현금 부족 시 분납, 연부연납 가능성은 세액과 담보, 허가 요건을 별도로 확인합니다.'],
+            ['법인 보험 세무처리', '국세법령정보시스템, 국세청 질의회신', '계약자, 피보험자, 수익자, 만기환급금 유무, 퇴직금 목적에 따라 손금·익금 처리가 달라질 수 있습니다.'],
+            ['가업승계 여부', '국세청 상속세·증여세 안내', '가업상속공제, 연부연납 특례 등은 회사 규모와 지분, 업력, 고용 유지 요건을 함께 봅니다.'],
+          ],
+        },
+        note: '보험을 통한 상속세 재원 마련은 절세 상품처럼 단정하지 말고, 현금흐름과 납부 재원 확보 방안으로 설명합니다.',
+      },
     ],
   },
   {
@@ -1157,6 +1189,23 @@ export const wikiPages: WikiPage[] = [
     audience: '상담자, 교육 담당자',
     tags: ['사내근로복지기금', '복지', '법인세', '4대보험', '인재확보'],
     sourceFiles: ['3탄_사내근로복지기금 브로셔.pptx', '업무메뉴얼_MEGAINFO_수정2(26.06.01).pptx'],
+    externalLinks: [
+      {
+        label: '고용노동부 사내근로복지기금',
+        url: 'https://www.moel.go.kr/policyitrd/policyItrdView.do?policy_itrd_sn=135',
+        description: '제도 정의와 정책 안내',
+      },
+      {
+        label: '근로복지넷 근로복지기금 지원사업',
+        url: 'https://welfare.comwel.or.kr/default/page.do?mCode=E040010000',
+        description: '사내·공동근로복지기금 지원사업 확인',
+      },
+      {
+        label: '사내·공동근로복지기금 업무처리지침',
+        url: 'https://www.law.go.kr/LSW/admRulLsInfoP.do?admRulSeq=2100000186651',
+        description: '설립인가와 관리·운영 지침',
+      },
+    ],
     blocks: [
       {
         heading: '핵심 효과',
@@ -1183,6 +1232,18 @@ export const wikiPages: WikiPage[] = [
         ],
         note: '사내근로복지기금은 세제혜택만 보고 접근하면 위험합니다. 실제 복지 목적, 운영 규정, 회계 처리, 사후관리까지 같이 설계해야 합니다.',
       },
+      {
+        heading: '공식 확인처와 최신 확인 기준',
+        table: {
+          headers: ['확인 항목', '공식 확인처', '상담 전 체크'],
+          rows: [
+            ['제도 정의', '고용노동부 사내근로복지기금제도 정책 안내', '사업주가 이익 일부를 출연해 근로자 복지에 쓰는 제도라는 기본 취지를 먼저 확인합니다.'],
+            ['설립·운영 지침', '국가법령정보센터 사내·공동근로복지기금 업무처리지침', '기금법인 설립, 관리, 운영지도 기준이 최신 지침과 맞는지 봅니다.'],
+            ['지원사업', '근로복지넷 근로복지기금 지원사업', '대기업/원청 출연, 공동근로복지기금 지원 등 보조금 성격의 지원은 공고별 한도와 기간을 확인합니다.'],
+            ['세무 처리', '국세청·세무 전문가 검토', '출연금 손비, 수혜자 과세 여부, 급여성 복지와의 구분을 반드시 별도로 확인합니다.'],
+          ],
+        },
+      },
     ],
   },
   {
@@ -1193,6 +1254,18 @@ export const wikiPages: WikiPage[] = [
     audience: '상담자',
     tags: ['벤처투자', '소득공제', '개인투자조합', '절세'],
     sourceFiles: ['4탄_벤처투자 소득공제 개인투자조합 브로셔.pptx', '업무메뉴얼_MEGAINFO_수정2(26.06.01).pptx'],
+    externalLinks: [
+      {
+        label: '벤처투자종합포털',
+        url: 'https://www.vcs.go.kr/',
+        description: '벤처투자 정보와 투자확인서 관련 포털',
+      },
+      {
+        label: '벤처기업확인시스템',
+        url: 'https://www.smes.go.kr/venturein/institution/requireGuide',
+        description: '벤처기업 확인 유형별 요건',
+      },
+    ],
     blocks: [
       {
         heading: '핵심 설명',
@@ -1211,6 +1284,19 @@ export const wikiPages: WikiPage[] = [
           ],
         },
       },
+      {
+        heading: '공식 확인처와 최신 확인 기준',
+        table: {
+          headers: ['확인 항목', '공식 확인처', '상담 전 체크'],
+          rows: [
+            ['벤처투자 정보', '중소벤처기업부 벤처투자종합포털', '투자 대상, 투자자, 개인투자조합 정보와 소득공제용 투자확인서 관련 메뉴를 확인합니다.'],
+            ['벤처기업 여부', '벤처기업확인시스템', '투자 대상 기업이 벤처기업 또는 공제 가능 투자 대상인지 먼저 확인합니다.'],
+            ['소득공제 적용', '조세특례제한법 및 국세청 기준', '투자금액 구간별 공제율, 종합소득 한도, 보유기간과 추징 사유를 최신 기준으로 확인합니다.'],
+            ['투자 리스크', '투자설명서와 조합 규약', '원금 손실 가능성과 조합 존속기간, 환매 제한을 반드시 안내합니다.'],
+          ],
+        },
+        note: '벤처투자 소득공제는 절세만 강조하면 위험합니다. 투자 상품이므로 손실 가능성과 회수 제한을 함께 안내해야 합니다.',
+      },
     ],
   },
   {
@@ -1221,6 +1307,18 @@ export const wikiPages: WikiPage[] = [
     audience: '상담자, TM 담당자',
     tags: ['ISO', '9001', '14001', '45001', '입찰', '인증'],
     sourceFiles: ['6탄_ISO 브로셔.pptx', '업무메뉴얼_MEGAINFO_수정2(26.06.01).pptx'],
+    externalLinks: [
+      {
+        label: 'ISO Management System Standards',
+        url: 'https://www.iso.org/management-system-standards.html',
+        description: 'ISO 경영시스템 표준 공식 설명',
+      },
+      {
+        label: 'ISO 45001 설명',
+        url: 'https://www.iso.org/home/insights-news/resources/iso-45001-explained-what-it-is.html',
+        description: '안전보건경영시스템 공식 설명',
+      },
+    ],
     blocks: [
       {
         heading: '대표 인증',
@@ -1244,6 +1342,18 @@ export const wikiPages: WikiPage[] = [
         },
         note: 'ISO는 인증서만 받는 업무가 아니라 내부 문서, 절차, 심사 대응이 같이 움직입니다.',
       },
+      {
+        heading: '공식 확인처와 최신 확인 기준',
+        table: {
+          headers: ['확인 항목', '공식 확인처', '상담 전 체크'],
+          rows: [
+            ['규격 의미', 'ISO Management system standards', '9001은 품질, 14001은 환경, 45001은 안전보건처럼 규격별 목적을 구분합니다.'],
+            ['필요 규격', '입찰 공고, 거래처 요구서, 인증기관 안내', '회사가 실제로 필요한 인증이 무엇인지 요구 문서 기준으로 확인합니다.'],
+            ['인증 범위', '인증기관 심사 기준', '사업장, 업종, 적용 프로세스 범위가 인증서에 어떻게 들어갈지 확인합니다.'],
+            ['사후관리', '인증기관 유지심사 안내', '인증 취득 후에도 내부심사, 경영검토, 문서 유지, 갱신심사가 필요합니다.'],
+          ],
+        },
+      },
     ],
   },
   {
@@ -1254,6 +1364,28 @@ export const wikiPages: WikiPage[] = [
     audience: '상담자, TM 담당자',
     tags: ['연구소', '벤처기업', '이노비즈', '메인비즈', '세액공제'],
     sourceFiles: ['7탄_연구소 및 혁신인증 브로셔.pptx', '업무메뉴얼_MEGAINFO_수정2(26.06.01).pptx'],
+    externalLinks: [
+      {
+        label: '기업부설연구소 신규신고요건',
+        url: 'https://www.rnd.or.kr/user/newly/requirements.do',
+        description: '연구전담요원과 연구공간 요건',
+      },
+      {
+        label: '기업부설연구소 제도 개요',
+        url: 'https://www.rnd.or.kr/user/info/outline.do',
+        description: '기업 규모별 인적요건 확인',
+      },
+      {
+        label: '이노비즈 공식 시스템',
+        url: 'https://www.innobiz.net/',
+        description: '이노비즈 신청, 연장, 확인서 발급',
+      },
+      {
+        label: '벤처기업확인시스템',
+        url: 'https://www.smes.go.kr/venturein/institution/requireGuide',
+        description: '벤처기업 확인 유형별 요건',
+      },
+    ],
     blocks: [
       {
         heading: '연구소 혜택',
@@ -1285,6 +1417,19 @@ export const wikiPages: WikiPage[] = [
           '부적합 요건이 발견되면 보완 방향을 먼저 정리합니다.',
         ],
       },
+      {
+        heading: '공식 확인처와 최신 확인 기준',
+        table: {
+          headers: ['확인 항목', '공식 확인처', '상담 전 체크'],
+          rows: [
+            ['기업부설연구소 요건', '기업부설연구소/전담부서 신고관리시스템', '기업 규모별 연구전담요원 수, 전담부서 가능 여부, 연구공간 분리 요건을 확인합니다.'],
+            ['벤처기업 확인', '중소벤처기업 벤처확인시스템', '투자유형, 연구개발유형, 혁신성장유형 중 어떤 유형으로 접근할지 봅니다.'],
+            ['이노비즈', '이노비즈 공식 시스템', '기술혁신 역량, 현장평가 준비, 유효기간 연장 기준을 확인합니다.'],
+            ['메인비즈', '메인비즈 공식 시스템', '경영혁신형 인증 목적과 평가 준비 항목을 확인합니다.'],
+          ],
+        },
+        note: '연구소와 혁신인증은 최초 인정도 중요하지만 사후관리에서 취소 리스크가 생깁니다. 연구활동 증빙을 계속 남기는지 확인해야 합니다.',
+      },
     ],
   },
   {
@@ -1295,6 +1440,23 @@ export const wikiPages: WikiPage[] = [
     audience: '상담자, TM 담당자',
     tags: ['병역특례', '산업기능요원', '전문연구요원', '제조업', '공장등록'],
     sourceFiles: ['8탄_병역특례 지정업체 브로셔.pptx', '업무메뉴얼_MEGAINFO_수정2(26.06.01).pptx'],
+    externalLinks: [
+      {
+        label: '병무청 산업지원 병역일터',
+        url: 'https://work.mma.go.kr/',
+        description: '병역지정업체, 인원배정, 편입 정보',
+      },
+      {
+        label: '병무청 병역지정업체 선정 안내',
+        url: 'https://www.mma.go.kr/contents.do?mc=mma0000761',
+        description: '선정 구비서류와 분야별 기준',
+      },
+      {
+        label: '산업통상자원부 병역지정업체 공고',
+        url: 'https://www.motir.go.kr/kor/article/ATCLc01b2801b/71160/view',
+        description: '2027년 산업기능요원 신청 접수 공고 예시',
+      },
+    ],
     blocks: [
       {
         heading: '제도 설명',
@@ -1316,6 +1478,19 @@ export const wikiPages: WikiPage[] = [
           ],
         },
       },
+      {
+        heading: '공식 확인처와 최신 확인 기준',
+        table: {
+          headers: ['확인 항목', '공식 확인처', '상담 전 체크'],
+          rows: [
+            ['제도와 일정', '병무청 산업지원 병역일터', '신규 병역지정업체 선정, 필요인원 신청, 편입 관련 메뉴를 확인합니다.'],
+            ['구비서류', '병무청 병역지정업체 선정 안내', '연구기관은 연구기관 인정서와 연구전담요원 증빙, 산업체는 공장등록증명서 등 분야별 서류를 봅니다.'],
+            ['추천기관 공고', '산업통상자원부 등 추천기관 공고', '접수기간, 추천명부 제출, 병무청 선정·배정 일정이 매년 다르므로 공고 연도를 확인합니다.'],
+            ['가채점', '추천기관 평가표와 병무청 기준', '제조 매출, 연구소, 수출, 특허, 고용 등 점수 항목을 미리 확인합니다.'],
+          ],
+        },
+        note: '병역특례는 일정이 지나면 해당 연도 신청이 어려울 수 있습니다. 상담 시에는 현재 접수 가능한 연도와 추천기관을 먼저 확인합니다.',
+      },
     ],
   },
   {
@@ -1326,6 +1501,18 @@ export const wikiPages: WikiPage[] = [
     audience: '상담자, TM 담당자',
     tags: ['특허', 'IP', '양수도', '재평가', '라이센스', '바우처'],
     sourceFiles: ['10탄_특허전략 브로셔.pptx', '업무메뉴얼_MEGAINFO_수정2(26.06.01).pptx'],
+    externalLinks: [
+      {
+        label: '지식재산처 IP 금융 연계 평가지원',
+        url: 'https://www.kipo.go.kr/ko/kpoContentView.do?menuCd=SCD0200353',
+        description: 'IP 기반 보증·담보대출·투자 평가비용 지원',
+      },
+      {
+        label: '한국발명진흥회 IP담보대출 평가 지원',
+        url: 'https://www.kipa.org/kipa/ip001/kw_business_0901.jsp',
+        description: '평가비 지원 대상과 협약은행 확인',
+      },
+    ],
     blocks: [
       {
         heading: '주요 전략',
@@ -1349,6 +1536,19 @@ export const wikiPages: WikiPage[] = [
         heading: '바우처 연계',
         bullets: ['혁신바우처는 컨설팅, 기술, 마케팅 비용 지원과 연결됩니다.', '수출바우처는 해외 진출 관련 서비스와 특허/인증 보유 평가 우대에 연결될 수 있습니다.'],
       },
+      {
+        heading: '공식 확인처와 최신 확인 기준',
+        table: {
+          headers: ['확인 항목', '공식 확인처', '상담 전 체크'],
+          rows: [
+            ['IP 금융', '지식재산처 IP 금융 연계 평가지원', '보증, 담보대출, 투자 등 어떤 자금조달 방식과 연결할지 확인합니다.'],
+            ['IP담보대출 평가', '한국발명진흥회 IP담보대출연계 지식재산평가지원', '등록 특허 보유 여부, 사업화 활용 여부, 평가비 지원 한도와 협약은행을 확인합니다.'],
+            ['특허 권리 상태', '특허정보검색서비스', '등록 상태, 권리자, 존속기간, 권리 범위를 확인합니다.'],
+            ['세무 처리', '세무 전문가 검토', '개인 특허 법인 양수도와 라이선스는 평가금액, 소득구분, 부당행위계산 리스크를 확인합니다.'],
+          ],
+        },
+        note: '특허는 보유만으로 금융이나 세제 효과가 확정되지 않습니다. 등록 상태, 사업화 가능성, 평가기관 인정 여부가 같이 맞아야 합니다.',
+      },
     ],
   },
   {
@@ -1359,6 +1559,28 @@ export const wikiPages: WikiPage[] = [
     audience: '상담자, TM 담당자',
     tags: ['고용장려금', '두루누리', '청년일자리', '고용유지', '유연근무', '육아휴직'],
     sourceFiles: ['11탄_고용장려금 지원제도 브로셔(청년내일채움공제 제외ver).pptx', '11탄_고용장려금 지원제도 체크리스트(대면용).pptx'],
+    externalLinks: [
+      {
+        label: '고용24 청년일자리도약장려금',
+        url: 'https://www.work24.go.kr/wk/k/h/1200/retrieveYngJumpIndivSptfndIntro.do',
+        description: '청년일자리도약장려금 사업 안내',
+      },
+      {
+        label: '고용노동부 2026년 사업운영 지침',
+        url: 'https://www.moel.go.kr/news/notice/noticeView.do?bbs_seq=20260100030',
+        description: '2026년 청년일자리도약장려금 지침 공지',
+      },
+      {
+        label: '두루누리 사회보험료 지원',
+        url: 'https://insurancesupport.or.kr/durunuri/intro.php',
+        description: '지원 대상, 수준, 기간 확인',
+      },
+      {
+        label: '복지로 두루누리 안내',
+        url: 'https://www.bokjiro.go.kr/ssis-teu/twataa/wlfareInfo/moveTWAT52011M.do?wlfareInfoId=WLF00000095',
+        description: '소규모사업 저임금 근로자 지원 안내',
+      },
+    ],
     blocks: [
       {
         heading: '주요 항목',
@@ -1386,6 +1608,20 @@ export const wikiPages: WikiPage[] = [
         heading: '상담 시 주의',
         paragraphs: ['고용지원금은 매년 고용노동부 고시와 예산에 따라 요건과 금액이 달라집니다. 현장 안내 전 최신 기준 확인이 필요합니다.'],
       },
+      {
+        heading: '2026년 공식 확인 기준',
+        table: {
+          headers: ['지원 항목', '공식 확인처', '상담 전 체크'],
+          rows: [
+            ['청년일자리도약장려금', '고용24, 고용노동부 2026년 사업운영 지침', '2026.1.1.~2026.12.31. 채용 대상, 참여신청 승인, 채용 후 3개월 이내 신청 예외, 예산 소진 가능성을 확인합니다.'],
+            ['두루누리', '두루누리 사회보험 공식 사이트, 복지로', '근로자 10인 미만 사업장, 월평균보수 기준, 신규가입자 여부, 지원기간 36개월 제한을 확인합니다.'],
+            ['고용촉진/고령자', '고용24 기업지원금 메뉴', '대상 근로자 유형, 채용일, 근속기간, 중복지원 제한을 확인합니다.'],
+            ['유연근무/워라밸', '고용24 및 고용노동부 공고', '근태관리 방식, 제도 도입 전후 증빙, 신청기간을 확인합니다.'],
+            ['출산·육아기 지원', '고용24 모성보호·기업지원 메뉴', '육아휴직, 근로시간 단축, 대체인력 채용 여부를 확인합니다.'],
+          ],
+        },
+        note: '고용지원금은 예산 범위 내 사업이 많아 요건을 충족해도 신청 시점에 따라 지원되지 않을 수 있습니다.',
+      },
     ],
   },
   {
@@ -1396,6 +1632,28 @@ export const wikiPages: WikiPage[] = [
     audience: '상담자',
     tags: ['장애인표준사업장', '장애인고용', '세액감면', '공공시장', '무상지원금'],
     sourceFiles: ['12탄_장애인표준사업장 브로셔.pptx', '업무메뉴얼_MEGAINFO_수정2(26.06.01).pptx'],
+    externalLinks: [
+      {
+        label: '한국장애인고용공단 표준사업장 제도',
+        url: 'https://www.kead.or.kr/spdsysdesc/cntntsPage.do?menuId=MENU0694',
+        description: '인증 기준과 지원금 신청자격',
+      },
+      {
+        label: '2026년 일반형 표준사업장 무상지원금',
+        url: 'https://www.kead.or.kr/bbs/deptgongji/bbsView.do?adt1Code=&adt1CodeArr=&adt2Code=&bbsCnId=209899&bbsCode=deptgongji&bbsNm=%EB%B6%80%EC%84%9C+%EA%B3%B5%EC%A7%80%EC%82%AC%ED%95%AD&menuId=MENU0895&pageIndex=1&recordCountPerPage=10&registDeptCode=&searchCondition=sjcn&searchKeyword=',
+        description: '2026년 모집기간, 대상, 접수처 확인',
+      },
+      {
+        label: '기업마당 표준사업장 공고',
+        url: 'https://www.bizinfo.go.kr/sii/siia/selectSIIA200Detail.do?pblancId=PBLN_000000000117156',
+        description: '지원한도와 신청방법 요약',
+      },
+      {
+        label: '자회사형 표준사업장 제도',
+        url: 'https://www.kead.or.kr/spdstndsyst/cntntsPage.do?menuId=MENU0698',
+        description: '모회사 의무고용률과 자회사형 설립 안내',
+      },
+    ],
     blocks: [
       {
         heading: '핵심 요건',
@@ -1416,6 +1674,20 @@ export const wikiPages: WikiPage[] = [
         },
         note: '장애인표준사업장은 세금 혜택만으로 설명하지 말고 실제 고용 유지, 편의시설, 관리체계까지 확인해야 합니다.',
       },
+      {
+        heading: '공식 확인처와 최신 확인 기준',
+        table: {
+          headers: ['확인 항목', '공식 확인처', '상담 전 체크'],
+          rows: [
+            ['인증 기준', '한국장애인고용공단 장애인표준사업장 제도설명', '장애인 10명 이상, 상시근로자 중 장애인 30% 이상, 편의시설, 최저임금 요건을 확인합니다.'],
+            ['무상지원금', '한국장애인고용공단 연도별 모집 공고', '2026년 일반형 모집처럼 접수기간과 예산, 대상자 모집 방식이 공고별로 정해지는지 확인합니다.'],
+            ['지원 한도', '한국장애인고용공단·기업마당 공고', '사업주당 한도, 장애인 신규 고용조건, 1인당 지원 기준은 해당 연도 공고문을 우선합니다.'],
+            ['자회사형', '한국장애인고용공단 자회사형 표준사업장 안내', '모회사 의무고용률, 자회사 고용인원, 중증장애인 산정 기준을 함께 봅니다.'],
+            ['사후관리', '공단 인증·지원금 약정', '지원금 담보, 고용 유지, 편의시설 유지 등 사후관리 조건을 확인합니다.'],
+          ],
+        },
+        note: '장애인표준사업장은 고용 유지와 근무환경 설계가 핵심입니다. 지원금 규모보다 실제 채용 가능 직무와 관리 체계를 먼저 확인합니다.',
+      },
     ],
   },
   {
@@ -1426,6 +1698,28 @@ export const wikiPages: WikiPage[] = [
     audience: 'TM 담당자, 상담자, 교육 담당자',
     tags: ['서비스매칭', '상담분류', '절세', '고용지원금', '병특', 'ISO', '특허', '장애인표준사업장'],
     sourceFiles: ['업무메뉴얼_MEGAINFO_수정2(26.06.01).pptx', '스크립트.txt'],
+    externalLinks: [
+      {
+        label: '고용24',
+        url: 'https://www.work24.go.kr/',
+        description: '고용지원금과 기업지원 제도 확인',
+      },
+      {
+        label: '벤처투자종합포털',
+        url: 'https://www.vcs.go.kr/',
+        description: '벤처투자 정보와 투자확인서 확인',
+      },
+      {
+        label: '병무청 산업지원 병역일터',
+        url: 'https://work.mma.go.kr/',
+        description: '병역지정업체와 산업기능요원 확인',
+      },
+      {
+        label: '한국장애인고용공단',
+        url: 'https://www.kead.or.kr/',
+        description: '장애인 고용과 표준사업장 제도 확인',
+      },
+    ],
     blocks: [
       {
         heading: '업체 상황별 1차 연결',

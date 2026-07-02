@@ -74,7 +74,8 @@
 .activeFilter,
 .pageButton,
 .activePageButton,
-.related button {
+.related button,
+.externalLink {
   border: 1px solid #333333;
   background: #ffffff;
   color: #111827;
@@ -507,13 +508,15 @@
   border-top: 1px solid #eef2f7;
 }
 
-.related div {
+.relatedList,
+.externalLinkList {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
 }
 
-.related button {
+.related button,
+.externalLink {
   min-height: 34px;
   border-color: #cbd5e1;
   border-radius: 8px;
@@ -521,11 +524,41 @@
   color: #111827;
   font-size: 13px;
   font-weight: 900;
+  text-decoration: none;
+}
+
+.externalTitle {
+  margin-top: 16px !important;
+}
+
+.externalLink {
+  display: inline-flex;
+  min-height: 54px;
+  max-width: 280px;
+  align-items: flex-start;
+  flex-direction: column;
+  justify-content: center;
+  padding: 9px 12px;
+  line-height: 1.35;
+}
+
+.externalLink strong,
+.externalLink span {
+  display: block;
+  min-width: 0;
+}
+
+.externalLink span {
+  margin-top: 3px;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 750;
 }
 
 .secondaryButton:hover,
 .filterButton:hover,
-.related button:hover {
+.related button:hover,
+.externalLink:hover {
   background: #f8fafc;
 }
 
