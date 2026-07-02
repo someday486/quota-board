@@ -75,7 +75,7 @@ export default function WikiClient({ categories, pages }: WikiClientProps) {
           <div className={styles.headerText}>
             <div className={styles.titleRow}>
               <h1>업무 위키</h1>
-              <span className={styles.dateBadge}>정리 기준 2026.06.26</span>
+              <span className={styles.dateBadge}>정리 기준 2026.07.02</span>
             </div>
             <p>섭외센터 매뉴얼, TM 스크립트, 서비스 브로셔, 운영 규정을 한 곳에서 검색합니다.</p>
           </div>
