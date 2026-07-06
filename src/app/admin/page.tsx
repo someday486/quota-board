@@ -179,6 +179,20 @@ const fmtDT = (v?: string | null) => {
     hour12: true,
   });
 };
+
+const fmtKstYmd = (v?: string | null) => {
+  const d = v ? new Date(v) : new Date();
+  const safe = Number.isNaN(d.getTime()) ? new Date() : d;
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Seoul',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(safe);
+  const byType = new Map(parts.map((p) => [p.type, p.value]));
+  return `${byType.get('year') ?? '0000'}-${byType.get('month') ?? '01'}-${byType.get('day') ?? '01'}`;
+};
+
 export default function AdminPage() {
   const router = useRouter();
   const isMobile = useIsMobile();
@@ -846,6 +860,7 @@ const handleToggleReviewed = async (applicationId: string, checked: boolean) => 
     const rows = targetRows.map((a) => ({
       applicationId: a.id,
       appliedAt: a.created_at,
+      appliedDate: fmtKstYmd(a.created_at),
       leaderName: a.leader_name ?? '',
       regionName: regionsMap.get(a.region_id)?.region_name ?? a.region_id,
       companyName: a.company_name ?? '',
@@ -871,9 +886,28 @@ const handleToggleReviewed = async (applicationId: string, checked: boolean) => 
       for (const result of json?.results ?? []) {
         if (result.applicationId) nextMap[result.applicationId] = result;
       }
-      setIntranetStatusByAppId((prev) => ({ ...prev, ...nextMap }));
 
-      const results = Object.values(nextMap);
+      const results = rows.map((row) => {
+        const result = nextMap[row.applicationId];
+        if (result) return result;
+        return {
+          applicationId: row.applicationId,
+          status: 'missing' as IntranetCheckStatus,
+          expectedApDate: row.appliedDate,
+          appliedDate: row.appliedDate,
+          matchCount: 0,
+          matches: [],
+          reason: 'not_found_in_latest_check',
+        };
+      });
+      setIntranetStatusByAppId((prev) => {
+        const next = { ...prev };
+        for (const result of results) {
+          next[result.applicationId] = result;
+        }
+        return next;
+      });
+
       const registered = results.filter((r) => r.status === 'registered' || r.status === 'multiple').length;
       const missing = results.filter((r) => r.status === 'missing').length;
       const needsCheck = results.length - registered - missing;

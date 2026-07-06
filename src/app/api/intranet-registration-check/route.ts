@@ -37,6 +37,33 @@ type DataCenterSyncResponse = {
   error?: string;
 };
 
+type IntranetCheckStatus =
+  | 'registered'
+  | 'missing'
+  | 'date_mismatch'
+  | 'multiple'
+  | 'similar'
+  | 'error';
+
+type IntranetCheckResult = {
+  applicationId: string;
+  status: IntranetCheckStatus;
+  expectedApDate?: string;
+  appliedDate?: string;
+  matchCount?: number;
+  matches?: unknown[];
+  reason?: string;
+};
+
+const INTRANET_CHECK_STATUSES = new Set<IntranetCheckStatus>([
+  'registered',
+  'missing',
+  'date_mismatch',
+  'multiple',
+  'similar',
+  'error',
+]);
+
 function env(name: string) {
   const raw = process.env[name];
   if (!raw) return '';
@@ -59,6 +86,16 @@ function getBearerToken(req: NextRequest) {
 function errorMessage(e: unknown) {
   if (e instanceof Error) return e.message;
   return typeof e === 'string' ? e : 'unknown error';
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function normalizeIntranetStatus(value: unknown): IntranetCheckStatus {
+  return typeof value === 'string' && INTRANET_CHECK_STATUSES.has(value as IntranetCheckStatus)
+    ? (value as IntranetCheckStatus)
+    : 'error';
 }
 
 function formatKstDate(value: string) {
@@ -161,6 +198,48 @@ async function syncCastTomorrowForBaseDates(baseDates: string[], token: string) 
   return summaries;
 }
 
+function normalizeCheckResults(
+  payloadRows: Array<{
+    applicationId: string;
+    appliedAt: string;
+    appliedDate: string;
+    leaderName: string;
+    regionName: string;
+    companyName: string;
+  }>,
+  responsePayload: Record<string, unknown>,
+): IntranetCheckResult[] {
+  const rawResults = Array.isArray(responsePayload.results) ? responsePayload.results : [];
+  const resultsById = new Map<string, IntranetCheckResult>();
+
+  for (const raw of rawResults) {
+    if (!isRecord(raw)) continue;
+    const applicationId = String(raw.applicationId ?? '').trim();
+    if (!applicationId) continue;
+    resultsById.set(applicationId, {
+      ...(raw as Partial<IntranetCheckResult>),
+      applicationId,
+      status: normalizeIntranetStatus(raw.status),
+    });
+  }
+
+  return payloadRows
+    .filter((row) => row.applicationId)
+    .map((row) => {
+      const result = resultsById.get(row.applicationId);
+      if (result) return result;
+      return {
+        applicationId: row.applicationId,
+        status: 'missing',
+        expectedApDate: row.appliedDate,
+        appliedDate: row.appliedDate,
+        matchCount: 0,
+        matches: [],
+        reason: 'not_found_in_latest_check',
+      };
+    });
+}
+
 export async function POST(req: NextRequest) {
   try {
     const supabaseUrl = env('NEXT_PUBLIC_SUPABASE_URL');
@@ -252,8 +331,9 @@ export async function POST(req: NextRequest) {
       throw new Error(message || '인트라넷 등록 확인에 실패했습니다.');
     }
 
-    const responsePayload = typeof json === 'object' && json !== null ? json : { result: true };
-    return NextResponse.json({ ...responsePayload, syncResults });
+    const responsePayload = isRecord(json) ? json : { result: true };
+    const normalizedResults = normalizeCheckResults(payloadRows, responsePayload);
+    return NextResponse.json({ ...responsePayload, results: normalizedResults, syncResults });
   } catch (e: unknown) {
     console.error('[intranet-registration-check] failed:', e);
     return NextResponse.json({ error: errorMessage(e) }, { status: 500 });
