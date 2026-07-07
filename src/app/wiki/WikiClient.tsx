@@ -12,9 +12,14 @@ type WikiClientProps = {
 };
 
 const ALL_CATEGORIES = 'all';
+const DEFAULT_BASIS_DATE = '2026-07-07';
 
 function categoryImageSrc(categoryId: WikiCategoryId) {
   return `/wiki/${categoryId}.svg`;
+}
+
+function formatBasisDate(date: string) {
+  return date.replaceAll('-', '.');
 }
 
 function pageSearchText(page: WikiPage) {
@@ -37,7 +42,26 @@ function pageSearchText(page: WikiPage) {
     ?.map((link) => [link.label, link.description ?? '', link.url].join(' '))
     .join(' ');
 
-  return [page.title, page.summary, page.audience, page.tags.join(' '), page.sourceFiles.join(' '), externalLinkText ?? '', blockText]
+  const responseGuideText = page.responseGuide
+    ?.map((guide) => [guide.objection, guide.response, guide.nextStep ?? ''].join(' '))
+    .join(' ');
+
+  const newsArticleText = page.newsArticles
+    ?.map((article) => [article.title, article.publisher, article.date ?? '', article.description ?? '', article.url].join(' '))
+    .join(' ');
+
+  return [
+    page.title,
+    page.summary,
+    page.audience,
+    page.tags.join(' '),
+    page.sourceFiles.join(' '),
+    page.basisDate ?? '',
+    responseGuideText ?? '',
+    newsArticleText ?? '',
+    externalLinkText ?? '',
+    blockText,
+  ]
     .join(' ')
     .toLowerCase();
 }
@@ -74,6 +98,9 @@ export default function WikiClient({ categories, pages }: WikiClientProps) {
     ?.map((id) => pages.find((page) => page.id === id))
     .filter((page): page is WikiPage => Boolean(page));
   const externalLinks = activePage?.externalLinks ?? [];
+  const responseGuide = activePage?.responseGuide ?? [];
+  const newsArticles = activePage?.newsArticles ?? [];
+  const basisDate = activePage?.basisDate ?? DEFAULT_BASIS_DATE;
 
   return (
     <main className={styles.page} lang="ko-KR">
@@ -82,7 +109,7 @@ export default function WikiClient({ categories, pages }: WikiClientProps) {
           <div className={styles.headerText}>
             <div className={styles.titleRow}>
               <h1>업무 위키</h1>
-              <span className={styles.dateBadge}>정리 기준 2026.07.02</span>
+              <span className={styles.dateBadge}>전체 점검 2026.07.07</span>
             </div>
             <p>섭외센터 매뉴얼, TM 스크립트, 서비스 브로셔, 운영 규정을 한 곳에서 검색합니다.</p>
           </div>
@@ -200,6 +227,11 @@ export default function WikiClient({ categories, pages }: WikiClientProps) {
                     <span>대상</span>
                     <b>{activePage.audience}</b>
                   </div>
+                  <div className={styles.basisBox}>
+                    <span>기준일</span>
+                    <b>{formatBasisDate(basisDate)}</b>
+                    <small>지원금·세법·인증 요건은 상담 전 재확인</small>
+                  </div>
                 </div>
               </div>
 
@@ -264,8 +296,26 @@ export default function WikiClient({ categories, pages }: WikiClientProps) {
                 ))}
               </div>
 
-              {(relatedPages && relatedPages.length > 0) || externalLinks.length > 0 ? (
-                <section className={styles.related} aria-label="관련 문서">
+              {responseGuide.length > 0 ? (
+                <section className={styles.responseGuide} aria-label="대표 반응별 대응집">
+                  <div className={styles.sectionTitleRow}>
+                    <span>즉시 대응</span>
+                    <h3>대표 반응별 대응집</h3>
+                  </div>
+                  <div className={styles.responseGrid}>
+                    {responseGuide.map((guide) => (
+                      <article key={guide.objection} className={styles.responseCard}>
+                        <strong>{guide.objection}</strong>
+                        <p>{guide.response}</p>
+                        {guide.nextStep ? <small>{guide.nextStep}</small> : null}
+                      </article>
+                    ))}
+                  </div>
+                </section>
+              ) : null}
+
+              {(relatedPages && relatedPages.length > 0) || externalLinks.length > 0 || newsArticles.length > 0 ? (
+                <section className={styles.related} aria-label="관련 자료">
                   {relatedPages && relatedPages.length > 0 ? (
                     <>
                       <h3>관련 문서</h3>
@@ -280,12 +330,36 @@ export default function WikiClient({ categories, pages }: WikiClientProps) {
                   ) : null}
                   {externalLinks.length > 0 ? (
                     <>
-                      <h3 className={styles.externalTitle}>외부 참고 링크</h3>
+                      <div className={styles.referenceHeader}>
+                        <span>공식</span>
+                        <h3>공식 확인 링크</h3>
+                      </div>
                       <div className={styles.externalLinkList}>
                         {externalLinks.map((link) => (
                           <a key={link.url} href={link.url} target="_blank" rel="noreferrer" className={styles.externalLink}>
+                            <span className={styles.referenceType}>공식 자료</span>
                             <strong>{link.label}</strong>
                             {link.description ? <span>{link.description}</span> : null}
+                          </a>
+                        ))}
+                      </div>
+                    </>
+                  ) : null}
+                  {newsArticles.length > 0 ? (
+                    <>
+                      <div className={styles.referenceHeader}>
+                        <span>기사</span>
+                        <h3>도움되는 기사</h3>
+                      </div>
+                      <div className={styles.newsList}>
+                        {newsArticles.map((article) => (
+                          <a key={article.url} href={article.url} target="_blank" rel="noreferrer" className={styles.newsCard}>
+                            <span className={styles.newsMeta}>
+                              {article.publisher}
+                              {article.date ? ` · ${formatBasisDate(article.date)}` : ''}
+                            </span>
+                            <strong>{article.title}</strong>
+                            {article.description ? <span>{article.description}</span> : null}
                           </a>
                         ))}
                       </div>

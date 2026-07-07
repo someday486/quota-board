@@ -12,6 +12,20 @@ export type WikiExternalLink = {
   description?: string;
 };
 
+export type WikiResponseGuide = {
+  objection: string;
+  response: string;
+  nextStep?: string;
+};
+
+export type WikiNewsArticle = {
+  title: string;
+  url: string;
+  publisher: string;
+  date?: string;
+  description?: string;
+};
+
 export type WikiBlock = {
   heading: string;
   paragraphs?: string[];
@@ -33,6 +47,9 @@ export type WikiPage = {
   audience: string;
   tags: string[];
   sourceFiles: string[];
+  basisDate?: string;
+  responseGuide?: WikiResponseGuide[];
+  newsArticles?: WikiNewsArticle[];
   externalLinks?: WikiExternalLink[];
   blocks: WikiBlock[];
   relatedPageIds?: string[];
@@ -1128,6 +1145,40 @@ export const wikiPages: WikiPage[] = [
     audience: '상담자, 교육 담당자',
     tags: ['상속세', '법인자금', '종신보험', '승계', '자사주'],
     sourceFiles: ['1탄_법인자금 활용 상속세 재원마련 플랜 브로셔.pptx', '업무메뉴얼_MEGAINFO_수정2(26.06.01).pptx'],
+    basisDate: '2026-07-07',
+    responseGuide: [
+      {
+        objection: '상속은 아직 멀었어요.',
+        response: '맞습니다. 다만 상속세 재원은 일이 생긴 뒤 준비하면 현금화 시간이 부족해질 수 있어서, 지금은 세금을 확정하자는 게 아니라 부족 재원만 미리 보는 단계입니다.',
+        nextStep: '대표님 연령, 법인 주식가치, 부동산·금융자산 비중만 먼저 받아 예상 재원 부족분을 계산합니다.',
+      },
+      {
+        objection: '세무사가 이미 봐주고 있어요.',
+        response: '세무사 검토는 꼭 필요합니다. 저희 쪽은 세무 판단을 대신하기보다 상속세 납부 재원이 실제로 마련돼 있는지 현금흐름 관점에서 정리해 드리는 역할입니다.',
+        nextStep: '세무사에게 같이 확인할 질문 목록과 보험·자사주 구조별 검토 포인트를 정리합니다.',
+      },
+      {
+        objection: '보험 이야기는 부담스럽습니다.',
+        response: '보험 가입을 전제로 보지 않아도 됩니다. 먼저 상속세 예상액, 보유 현금, 법인 현금흐름을 비교한 뒤 부족분이 있을 때 여러 재원 마련 방법 중 하나로 보는 게 맞습니다.',
+        nextStep: '보험료 부담 가능액보다 먼저 상속세 납부 가능 현금과 연부연납 가능성을 확인합니다.',
+      },
+    ],
+    newsArticles: [
+      {
+        title: '상속세 재원 마련 어렵다면 종신보험·상속감자 활용할 만',
+        url: 'https://www.hankyung.com/article/2025060189461',
+        publisher: '한국경제',
+        date: '2025-06-01',
+        description: '상속세 신고·납부 기한과 현금화 어려움을 상담 배경으로 설명할 때 참고하기 좋습니다.',
+      },
+      {
+        title: "부동산-주식 많다면 상속세 재원 마련은 '종신보험' 활용을",
+        url: 'https://www.donga.com/news/Economy/article/all/20260624/134168064/2',
+        publisher: '동아일보',
+        date: '2026-06-24',
+        description: '부동산·비상장주식처럼 즉시 현금화가 어려운 자산의 유동성 이슈를 설명할 때 활용합니다.',
+      },
+    ],
     externalLinks: [
       {
         label: '국세청 상속세 신고납부기한',
@@ -1189,6 +1240,40 @@ export const wikiPages: WikiPage[] = [
     audience: '상담자, 교육 담당자',
     tags: ['사내근로복지기금', '복지', '법인세', '4대보험', '인재확보'],
     sourceFiles: ['3탄_사내근로복지기금 브로셔.pptx', '업무메뉴얼_MEGAINFO_수정2(26.06.01).pptx'],
+    basisDate: '2026-07-07',
+    responseGuide: [
+      {
+        objection: '우리 같은 중소기업도 할 수 있나요?',
+        response: '가능성은 있습니다. 회사 단독 기금뿐 아니라 공동근로복지기금 형태도 있어서, 규모보다 출연 여력과 실제 복지 사용 목적이 맞는지 먼저 봐야 합니다.',
+        nextStep: '직원 수, 최근 이익, 복지비 지출 항목, 원청·협력사 관계를 확인합니다.',
+      },
+      {
+        objection: '직원 복지는 그냥 급여로 주면 되지 않나요?',
+        response: '급여는 관리가 쉽지만 근로소득세와 4대보험 부담이 같이 움직입니다. 복지기금은 복지 목적과 규정을 갖추면 다른 방식으로 설계할 수 있어 비교할 가치가 있습니다.',
+        nextStep: '현재 복지비·상여·식대·학자금 지급 방식을 표로 받아 급여성 비용과 복지성 비용을 구분합니다.',
+      },
+      {
+        objection: '운영이 복잡할 것 같습니다.',
+        response: '맞습니다. 그래서 세제혜택만 보고 시작하면 안 되고 설립, 규정, 회계, 사후관리까지 감당 가능한지 먼저 진단해야 합니다.',
+        nextStep: '설립 목적, 출연 예정액, 복지사업 범위, 내부 관리 담당자를 먼저 정합니다.',
+      },
+    ],
+    newsArticles: [
+      {
+        title: '“대·중소기업 복지 격차 해소” 299억원 투입',
+        url: 'https://www.labortoday.co.kr/news/articleView.html?idxno=226578',
+        publisher: '매일노동뉴스',
+        date: '2025-03-10',
+        description: '공동근로복지기금 지원과 중소기업 복지 격차 이슈를 설명할 때 참고합니다.',
+      },
+      {
+        title: '[칼럼] 사내근로복지기금, 복지제도 넘어 기업의 지속 가능한 성장 전략',
+        url: 'https://v.daum.net/v/20260128104413979?f=p',
+        publisher: '다음뉴스',
+        date: '2026-01-28',
+        description: '중소기업도 공동기금과 정부 매칭 지원을 검토할 수 있다는 메시지를 설명할 때 참고합니다.',
+      },
+    ],
     externalLinks: [
       {
         label: '고용노동부 사내근로복지기금',
@@ -1254,6 +1339,40 @@ export const wikiPages: WikiPage[] = [
     audience: '상담자',
     tags: ['벤처투자', '소득공제', '개인투자조합', '절세'],
     sourceFiles: ['4탄_벤처투자 소득공제 개인투자조합 브로셔.pptx', '업무메뉴얼_MEGAINFO_수정2(26.06.01).pptx'],
+    basisDate: '2026-07-07',
+    responseGuide: [
+      {
+        objection: '절세는 좋은데 투자 손실이 걱정됩니다.',
+        response: '그 걱정이 맞습니다. 벤처투자는 절세 상품이 아니라 투자 상품이라 소득공제 효과와 원금 손실 가능성을 같이 놓고 봐야 합니다.',
+        nextStep: '투자 가능 금액, 종합소득 과세표준, 회수 가능 기간, 손실 감내 범위를 먼저 확인합니다.',
+      },
+      {
+        objection: '벤처기업인지 확인하기 어렵습니다.',
+        response: '투자 대상이 공제 가능한 벤처기업인지가 핵심입니다. 확인서와 투자확인서 발급 가능 여부를 공식 시스템 기준으로 확인해야 합니다.',
+        nextStep: '투자 대상 법인명, 사업자번호, 벤처확인 유형, 투자 방식(직접/조합)을 확인합니다.',
+      },
+      {
+        objection: '소득공제 금액이 얼마나 되는지 모르겠습니다.',
+        response: '공제율은 투자금액 구간과 보유기간, 개인의 소득 수준에 따라 달라집니다. 대략 계산 후 세무 신고 시 최종 검토하는 흐름이 안전합니다.',
+        nextStep: '작년 종합소득금액과 예상 투자금액을 받아 시뮬레이션 범위를 잡습니다.',
+      },
+    ],
+    newsArticles: [
+      {
+        title: '이찬진 금감원장도 했다는 절세 비법… 매해 폭증하는 비상장 벤처투자',
+        url: 'https://biz.chosun.com/stock/market_trend/2026/02/17/TIOTCNL5XVFAJM6BW6MVAUIH6Y/',
+        publisher: '조선비즈',
+        date: '2026-02-17',
+        description: '개인투자조합 소득공제가 고소득자 절세 관심사로 언급되는 배경 자료입니다.',
+      },
+      {
+        title: "2026년 벤처투자 제도 전면 개편…투자 혹한기 속 '숨통' 트이나",
+        url: 'https://platum.kr/archives/278814',
+        publisher: '플래텀',
+        date: '2026-01-06',
+        description: '개인투자조합과 벤처투자 제도 변화 흐름을 설명할 때 참고합니다.',
+      },
+    ],
     externalLinks: [
       {
         label: '벤처투자종합포털',
@@ -1307,6 +1426,40 @@ export const wikiPages: WikiPage[] = [
     audience: '상담자, TM 담당자',
     tags: ['ISO', '9001', '14001', '45001', '입찰', '인증'],
     sourceFiles: ['6탄_ISO 브로셔.pptx', '업무메뉴얼_MEGAINFO_수정2(26.06.01).pptx'],
+    basisDate: '2026-07-07',
+    responseGuide: [
+      {
+        objection: '인증서가 꼭 필요한가요?',
+        response: '모든 회사에 필요한 건 아닙니다. 다만 입찰, 납품, 거래처 심사에서 ISO가 요구되거나 가점이 되는 업종이면 미리 준비하지 않으면 일정이 밀릴 수 있습니다.',
+        nextStep: '최근 입찰 공고, 거래처 요구서, 납품 예정 업종을 받아 필요한 규격부터 확인합니다.',
+      },
+      {
+        objection: '전에 인증 받았는데 효과가 없었습니다.',
+        response: '인증서만 받으면 효과가 약할 수 있습니다. 이번에는 인증 목적이 입찰인지, 거래처 대응인지, 내부 프로세스 정비인지부터 정리해야 합니다.',
+        nextStep: '기존 인증 규격, 유효기간, 유지심사 이력, 실제 활용처를 확인합니다.',
+      },
+      {
+        objection: '컨설팅 비용이 부담됩니다.',
+        response: '비용은 인증 범위와 사업장, 규격 수에 따라 달라집니다. 일부 지역·기관 지원사업이 열릴 수 있어 자부담 구조와 신청 가능성을 같이 확인하는 편이 좋습니다.',
+        nextStep: '희망 규격, 사업장 수, 인증 희망 시점, 지역 지원사업 가능성을 확인합니다.',
+      },
+    ],
+    newsArticles: [
+      {
+        title: '한국중소기업인증협회, 2026년 상반기 ISO 인증 비용 70% 지원',
+        url: 'https://www.mk.co.kr/news/business/11933867',
+        publisher: '매일경제',
+        date: '2026-01-15',
+        description: 'ISO 인증 비용과 지원사업을 언급할 때 시장 기사 예시로 활용합니다.',
+      },
+      {
+        title: '2026년 상반기 ISO인증 지원사업 관련 보도',
+        url: 'https://v.daum.net/v/UmIZRod8lM',
+        publisher: '다음뉴스',
+        date: '2026-01-15',
+        description: '심사비, 시험비, 컨설팅비 등 비용 범위를 설명할 때 참고합니다.',
+      },
+    ],
     externalLinks: [
       {
         label: 'ISO Management System Standards',
@@ -1364,6 +1517,40 @@ export const wikiPages: WikiPage[] = [
     audience: '상담자, TM 담당자',
     tags: ['연구소', '벤처기업', '이노비즈', '메인비즈', '세액공제'],
     sourceFiles: ['7탄_연구소 및 혁신인증 브로셔.pptx', '업무메뉴얼_MEGAINFO_수정2(26.06.01).pptx'],
+    basisDate: '2026-07-07',
+    responseGuide: [
+      {
+        objection: '연구 인력이 부족해서 안 될 것 같습니다.',
+        response: '기업부설연구소만 답은 아닙니다. 규모와 인력에 따라 연구전담부서부터 가능한지 확인할 수 있고, 혁신인증은 유형별 접근이 다릅니다.',
+        nextStep: '상시근로자 수, 연구전담 가능 인력, 전공·경력, 별도 연구공간 확보 가능성을 확인합니다.',
+      },
+      {
+        objection: '세액공제는 세무사가 알아서 해줍니다.',
+        response: '세액공제 신고는 세무사 검토가 맞습니다. 다만 연구소 인정, 연구활동 증빙, 인력·공간 유지가 되어야 공제 근거가 단단해집니다.',
+        nextStep: '연구노트, 과제계획서, 인건비 구분, 연구공간 사진 같은 증빙 보유 여부를 확인합니다.',
+      },
+      {
+        objection: '인증 받아도 관리가 귀찮습니다.',
+        response: '맞습니다. 그래서 처음부터 취득 후 유지할 수 있는 구조인지 봐야 합니다. 사후관리 리스크가 크면 무리한 인증보다 요건 보완부터 잡는 게 낫습니다.',
+        nextStep: '현지 확인 대비 서류와 담당자, 유효기간·연장 일정 관리 방식을 정합니다.',
+      },
+    ],
+    newsArticles: [
+      {
+        title: '2026년 새해 달라지는 벤처투자 제도 발표',
+        url: 'https://www.mss.go.kr/site/smba/ex/bbs/View.do?bcIdx=1064561&cbIdx=86&parentSeq=1064561',
+        publisher: '중소벤처기업부',
+        date: '2026-01-06',
+        description: '벤처투자 규제 개선과 세제 지원 확대 흐름을 혁신인증 상담 배경으로 볼 수 있습니다.',
+      },
+      {
+        title: "'혁신기업 3관왕' 테크랩스, '이노비즈'·'메인비즈'·'벤처기업' 인증 모두 획득",
+        url: 'https://www.unicornfactory.co.kr/article/2024111111020636861',
+        publisher: '유니콘팩토리',
+        date: '2024-11-11',
+        description: '벤처·이노비즈·메인비즈 인증이 대외 신뢰와 자금·지원 우대에 연결되는 사례로 활용합니다.',
+      },
+    ],
     externalLinks: [
       {
         label: '기업부설연구소 신규신고요건',
@@ -1440,6 +1627,40 @@ export const wikiPages: WikiPage[] = [
     audience: '상담자, TM 담당자',
     tags: ['병역특례', '산업기능요원', '전문연구요원', '제조업', '공장등록'],
     sourceFiles: ['8탄_병역특례 지정업체 브로셔.pptx', '업무메뉴얼_MEGAINFO_수정2(26.06.01).pptx'],
+    basisDate: '2026-07-07',
+    responseGuide: [
+      {
+        objection: '병역특례는 절차가 너무 복잡합니다.',
+        response: '맞습니다. 그래서 바로 신청부터 권하지 않고 가채점으로 가능성과 부족 항목을 먼저 보는 게 효율적입니다.',
+        nextStep: '제조 매출, 공장등록, 연구소 보유, 특허·수출·고용 항목을 받아 점수 가능성을 봅니다.',
+      },
+      {
+        objection: '우리 회사가 선정될 가능성이 낮을 것 같습니다.',
+        response: '선정 가능성은 업종과 추천기관, 가점 항목에 따라 달라집니다. 낮다고 단정하기보다 부족 점수를 어떤 인증이나 서류로 보완할지 확인해야 합니다.',
+        nextStep: '추천기관 공고와 병무청 기준표 기준으로 부족 항목을 표시합니다.',
+      },
+      {
+        objection: '인원을 배정받아도 관리가 어렵지 않나요?',
+        response: '복무관리는 중요한 리스크입니다. 담당자 지정, 교육, 근무기록, 편입 제한 사항을 관리할 수 있는 회사인지 먼저 확인해야 합니다.',
+        nextStep: '복무관리 담당자 후보와 근태·직무 배치 관리 방식부터 확인합니다.',
+      },
+    ],
+    newsArticles: [
+      {
+        title: '26년도 병역지정업체 선정 및 인원배정',
+        url: 'https://www.korea.kr/news/policyNewsView.do?newsId=156691766',
+        publisher: '대한민국 정책브리핑',
+        date: '2025-05-30',
+        description: '2026년도 배정 규모와 첨단전략산업 가점 흐름을 설명할 때 참고합니다.',
+      },
+      {
+        title: '2026년도 산업지원 분야 공지사항',
+        url: 'https://work.mma.go.kr/caisBYIS/board/boardList.do?gesipan_gbcd=13&menu_id=m_m8_6&tmpl_id=1',
+        publisher: '병무청 산업지원 병역일터',
+        date: '2026-07-07',
+        description: '신규편입자 교육, 채용박람회, 선정 기준 고시처럼 수시로 바뀌는 공지 확인용입니다.',
+      },
+    ],
     externalLinks: [
       {
         label: '병무청 산업지원 병역일터',
@@ -1501,6 +1722,40 @@ export const wikiPages: WikiPage[] = [
     audience: '상담자, TM 담당자',
     tags: ['특허', 'IP', '양수도', '재평가', '라이센스', '바우처'],
     sourceFiles: ['10탄_특허전략 브로셔.pptx', '업무메뉴얼_MEGAINFO_수정2(26.06.01).pptx'],
+    basisDate: '2026-07-07',
+    responseGuide: [
+      {
+        objection: '특허가 있어도 돈이 되나요?',
+        response: '특허 자체가 바로 돈이 되는 건 아닙니다. 등록 상태, 사업화 가능성, 가치평가, 금융기관 인정 여부가 맞을 때 IP 금융이나 라이선스 검토가 가능합니다.',
+        nextStep: '등록번호, 권리자, 존속기간, 매출과 연결되는 제품·기술을 먼저 확인합니다.',
+      },
+      {
+        objection: '특허 평가는 비용만 드는 것 아닌가요?',
+        response: '평가만 하고 끝나면 비용이 될 수 있습니다. 그래서 담보대출, 보증, 투자, 양수도 중 어떤 목적에 쓸지 정한 뒤 평가 지원 가능성을 확인해야 합니다.',
+        nextStep: '필요 자금 규모, 협약은행 거래 여부, 보증기관 상담 이력, 평가비 지원 대상 여부를 확인합니다.',
+      },
+      {
+        objection: '개인 특허를 법인으로 넘기는 건 세금 문제가 걱정됩니다.',
+        response: '맞습니다. 개인 특허 양수도와 라이선스는 평가금액과 소득구분이 중요해서 세무 검토가 꼭 필요합니다.',
+        nextStep: '권리자, 취득 경위, 법인 사용 현황, 예상 양도·사용료 구조를 세무 검토 자료로 정리합니다.',
+      },
+    ],
+    newsArticles: [
+      {
+        title: "신규 대출 꽉 막혔다? '특허' 담보 IP금융 정부가 보증합니다",
+        url: 'https://v.daum.net/v/2oAuzSWIvv?f=p',
+        publisher: 'YTN 라디오',
+        date: '2026-05-08',
+        description: 'IP 보증, 담보대출, 투자 방식의 차이를 상담자가 쉽게 설명할 때 참고합니다.',
+      },
+      {
+        title: '이제 IP보증대출도 온라인으로',
+        url: 'https://www.ipdaily.co.kr/2026/06/04/19/12/11/48577/%EC%9D%B4%EC%A0%9C-ip%EB%B3%B4%EC%A6%9D%EB%8C%80%EC%B6%9C%EB%8F%84-%EC%98%A8%EB%9D%BC%EC%9D%B8%EC%9C%BC%EB%A1%9C-%EC%9D%B8%ED%84%B0%EB%84%B7%EC%9D%80%ED%96%89%EA%B3%BC-%EC%97%85%EB%AC%B4/',
+        publisher: 'IPDaily',
+        date: '2026-06-04',
+        description: 'IP 금융 접근 방식이 온라인 업무까지 확장되는 흐름을 보여주는 참고 기사입니다.',
+      },
+    ],
     externalLinks: [
       {
         label: '지식재산처 IP 금융 연계 평가지원',
@@ -1559,6 +1814,40 @@ export const wikiPages: WikiPage[] = [
     audience: '상담자, TM 담당자',
     tags: ['고용장려금', '두루누리', '청년일자리', '고용유지', '유연근무', '육아휴직'],
     sourceFiles: ['11탄_고용장려금 지원제도 브로셔(청년내일채움공제 제외ver).pptx', '11탄_고용장려금 지원제도 체크리스트(대면용).pptx'],
+    basisDate: '2026-07-07',
+    responseGuide: [
+      {
+        objection: '지원금 신청이 너무 번거롭습니다.',
+        response: '맞습니다. 모든 지원금을 다 보자는 게 아니라 최근 채용·육아휴직·유연근무처럼 받을 가능성이 높은 항목만 골라보는 게 핵심입니다.',
+        nextStep: '최근 6개월 채용자, 청년·고령자 여부, 육아휴직 예정자, 유연근무 도입 여부를 체크리스트로 받습니다.',
+      },
+      {
+        objection: '이미 노무사가 알아서 해주고 있습니다.',
+        response: '노무사 검토가 있으면 더 좋습니다. 저희는 빠진 항목이 없는지, 신청 시점과 예산 소진 리스크가 있는지 목록화해 드리는 역할로 보면 됩니다.',
+        nextStep: '현재 신청 중인 지원금, 최근 채용자 명단, 고용보험 가입일을 대조합니다.',
+      },
+      {
+        objection: '우리 회사는 대상이 아닐 것 같습니다.',
+        response: '대상 여부는 업종, 근로자 수, 보수, 채용일, 근속기간에 따라 갈립니다. 전화상으로 배제하기보다 기본 요건만 확인해 보는 편이 안전합니다.',
+        nextStep: '상시근로자 수, 월 보수, 채용일, 고용보험 취득일, 사업장 지역을 확인합니다.',
+      },
+    ],
+    newsArticles: [
+      {
+        title: '청년일자리도약장려금 상반기 5.5만명 지원…비수도권 취업 우대',
+        url: 'https://www.yna.co.kr/view/AKR20260701163600530',
+        publisher: '연합뉴스',
+        date: '2026-07-02',
+        description: '2026년 청년일자리도약장려금 지원 규모와 비수도권 우대 포인트를 설명할 때 활용합니다.',
+      },
+      {
+        title: '2026년 청년일자리도약장려금 한눈에 알아보기',
+        url: 'https://www.korea.kr/news/policyNewsView.do?newsId=148961581',
+        publisher: '대한민국 정책브리핑',
+        date: '2026-04-01',
+        description: '기업과 청년 지원금 구조를 짧게 안내할 때 쓰기 좋은 정책 카드뉴스입니다.',
+      },
+    ],
     externalLinks: [
       {
         label: '고용24 청년일자리도약장려금',
@@ -1632,6 +1921,40 @@ export const wikiPages: WikiPage[] = [
     audience: '상담자',
     tags: ['장애인표준사업장', '장애인고용', '세액감면', '공공시장', '무상지원금'],
     sourceFiles: ['12탄_장애인표준사업장 브로셔.pptx', '업무메뉴얼_MEGAINFO_수정2(26.06.01).pptx'],
+    basisDate: '2026-07-07',
+    responseGuide: [
+      {
+        objection: '장애인 채용이 현실적으로 어렵습니다.',
+        response: '그래서 바로 채용부터 이야기하면 부담이 큽니다. 먼저 가능한 직무, 근무환경, 편의시설, 관리 담당자를 확인하고 직접고용과 자회사형 가능성을 나눠 봐야 합니다.',
+        nextStep: '반복 업무, 품질검수, 포장·사무보조 등 직무 후보와 근무공간을 확인합니다.',
+      },
+      {
+        objection: '지원금만 보고 시작하면 위험하지 않나요?',
+        response: '맞습니다. 표준사업장은 지원금보다 고용 유지와 근무환경이 핵심입니다. 인증 후 사후관리와 고용 유지 조건을 감당할 수 있는지 먼저 봐야 합니다.',
+        nextStep: '장애인 고용 계획, 시설 개선 범위, 1년 이상 유지 가능한 직무를 확인합니다.',
+      },
+      {
+        objection: '우리 규모에서 표준사업장이 가능한지 모르겠습니다.',
+        response: '인증 요건은 장애인 고용 인원과 비율, 편의시설, 최저임금 준수 등으로 확인합니다. 회사 규모와 채용 가능 인원부터 숫자로 보면 됩니다.',
+        nextStep: '상시근로자 수, 현재 장애인 근로자 수, 신규 채용 가능 인원, 작업장 면적을 확인합니다.',
+      },
+    ],
+    newsArticles: [
+      {
+        title: '장애인 고용 의무 다양화 방안 관련 법적 문제',
+        url: 'https://www.worklaw.co.kr/main2022/view/view.asp?bi_pidx=37683',
+        publisher: '노동법률',
+        date: '2025-03-01',
+        description: '자회사형 표준사업장과 의무고용률 반영 구조를 설명할 때 참고합니다.',
+      },
+      {
+        title: '[ESG 그리고 장애인 ③] 자회사형 표준사업장 키우는 대기업',
+        url: 'https://dealsitetv.com/articles/68216',
+        publisher: '딜사이트TV',
+        date: '2021-04-15',
+        description: '자회사형 표준사업장을 ESG와 장애인 고용 모델로 설명할 때 참고할 수 있는 기사입니다.',
+      },
+    ],
     externalLinks: [
       {
         label: '한국장애인고용공단 표준사업장 제도',
@@ -1698,6 +2021,19 @@ export const wikiPages: WikiPage[] = [
     audience: 'TM 담당자, 상담자, 교육 담당자',
     tags: ['서비스매칭', '상담분류', '절세', '고용지원금', '병특', 'ISO', '특허', '장애인표준사업장'],
     sourceFiles: ['업무메뉴얼_MEGAINFO_수정2(26.06.01).pptx', '스크립트.txt'],
+    basisDate: '2026-07-07',
+    responseGuide: [
+      {
+        objection: '어떤 서비스로 연결해야 할지 애매합니다.',
+        response: '애매하면 상품명을 먼저 고르기보다 회사 상황을 신호로 잡는 게 낫습니다. 채용, 인증, 기술, 세금, 인력난 중 가장 시급한 이슈를 하나만 고르면 연결 문서가 좁혀집니다.',
+        nextStep: '최근 채용, 입찰·납품, 연구소·특허, 대표 세금, 제조 인력난 중 해당되는 항목을 체크합니다.',
+      },
+      {
+        objection: '대표가 자세한 내용을 말하지 않습니다.',
+        response: '처음부터 세부 자료를 요구하면 부담스럽습니다. 받을 수 있는 지원금이나 점검 항목이 있는지 확인하는 정도로 낮춰서 다음 통화나 방문으로 넘깁니다.',
+        nextStep: '업종, 직원 수, 최근 채용 여부, 인증 필요 여부만 받아 1차 분류합니다.',
+      },
+    ],
     externalLinks: [
       {
         label: '고용24',
