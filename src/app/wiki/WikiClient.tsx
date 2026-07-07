@@ -102,6 +102,10 @@ export default function WikiClient({ categories, pages }: WikiClientProps) {
   const newsArticles = activePage?.newsArticles ?? [];
   const basisDate = activePage?.basisDate ?? DEFAULT_BASIS_DATE;
 
+  const handlePrint = () => {
+    window.print();
+  };
+
   return (
     <main className={styles.page} lang="ko-KR">
       <div className={styles.shell}>
@@ -114,6 +118,9 @@ export default function WikiClient({ categories, pages }: WikiClientProps) {
             <p>섭외센터 매뉴얼, TM 스크립트, 서비스 브로셔, 운영 규정을 한 곳에서 검색합니다.</p>
           </div>
           <div className={styles.headerActions}>
+            <button type="button" onClick={handlePrint} className={styles.secondaryButton}>
+              인쇄
+            </button>
             <button type="button" onClick={() => router.back()} className={styles.secondaryButton}>
               이전 화면
             </button>
