@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import { google } from 'googleapis';
+import { drive_v3, google } from 'googleapis';
 
 export const runtime = 'nodejs';
 
@@ -22,11 +22,31 @@ type DriveFile = {
   size?: string | null;
   fileExtension?: string | null;
   iconLink?: string | null;
+  parents?: string[] | null;
+};
+
+type ArchiveDriveFile = DriveFile & {
+  path: string;
+  parentPath: string;
+  depth: number;
+};
+
+type FolderQueueItem = {
+  id: string;
+  path: string;
+  depth: number;
 };
 
 const DEFAULT_RECORDING_ARCHIVE_FOLDER_ID =
   '1I2bsW3-c5BqKO8pKJIUa0ZAJJ64rswWmOfQw1AyBgtQeHu1QrR_Cz0YYUTk0KcvTewTRnjL-';
 const RECORDING_ARCHIVE_FOLDER_URL = `https://drive.google.com/drive/folders/${DEFAULT_RECORDING_ARCHIVE_FOLDER_ID}`;
+const FOLDER_MIME_TYPE = 'application/vnd.google-apps.folder';
+const MAX_DRIVE_FOLDER_DEPTH = 8;
+const MAX_DRIVE_FOLDER_COUNT = 250;
+const MAX_DRIVE_ITEM_COUNT = 5000;
+const MAX_PAGES_PER_FOLDER = 10;
+const MAX_DRIVE_FOLDER_CONCURRENCY = 6;
+const MAX_DRIVE_INDEX_PAGES = 50;
 
 function env(name: string) {
   const raw = process.env[name];
@@ -74,7 +94,7 @@ function buildDriveAuth() {
 
 function classifyFile(mimeType: string, extension: string) {
   const ext = extension.toLowerCase();
-  if (mimeType === 'application/vnd.google-apps.folder') return 'folder';
+  if (mimeType === FOLDER_MIME_TYPE) return 'folder';
   if (mimeType.startsWith('audio/') || ['mp3', 'm4a', 'wav', 'aac', 'wma', 'flac', 'ogg'].includes(ext)) return 'audio';
   if (mimeType.startsWith('video/') || ['mp4', 'mov', 'avi', 'mkv', 'webm'].includes(ext)) return 'video';
   if (
@@ -128,7 +148,190 @@ async function requireAdmin(req: NextRequest) {
   return { actor: actorProfile };
 }
 
-function toArchiveFile(file: DriveFile) {
+async function listFolderChildren(drive: drive_v3.Drive, folderId: string) {
+  const files: DriveFile[] = [];
+  let pageToken: string | undefined;
+  let pageCount = 0;
+
+  do {
+    const response = await drive.files.list({
+      q: `'${folderId.replace(/'/g, "\\'")}' in parents and trashed = false`,
+      pageSize: 1000,
+      pageToken,
+      orderBy: 'folder,name,modifiedTime desc',
+      supportsAllDrives: true,
+      includeItemsFromAllDrives: true,
+      fields:
+        'nextPageToken, files(id,name,mimeType,webViewLink,webContentLink,createdTime,modifiedTime,size,fileExtension,iconLink,parents)',
+    });
+
+    files.push(...((response.data.files as DriveFile[] | undefined) ?? []));
+    pageToken = response.data.nextPageToken ?? undefined;
+    pageCount += 1;
+  } while (pageToken && pageCount < MAX_PAGES_PER_FOLDER);
+
+  return {
+    files,
+    truncated: Boolean(pageToken),
+  };
+}
+
+async function listAccessibleDriveFiles(drive: drive_v3.Drive) {
+  const files: DriveFile[] = [];
+  let pageToken: string | undefined;
+  let pageCount = 0;
+
+  do {
+    const response = await drive.files.list({
+      q: 'trashed = false',
+      pageSize: 1000,
+      pageToken,
+      orderBy: 'folder,name,modifiedTime desc',
+      spaces: 'drive',
+      supportsAllDrives: true,
+      includeItemsFromAllDrives: true,
+      fields:
+        'nextPageToken, files(id,name,mimeType,webViewLink,webContentLink,createdTime,modifiedTime,size,fileExtension,iconLink,parents)',
+    });
+
+    files.push(...((response.data.files as DriveFile[] | undefined) ?? []));
+    pageToken = response.data.nextPageToken ?? undefined;
+    pageCount += 1;
+  } while (pageToken && pageCount < MAX_DRIVE_INDEX_PAGES);
+
+  return {
+    files,
+    truncated: Boolean(pageToken),
+  };
+}
+
+async function collectArchiveFilesFromIndex(drive: drive_v3.Drive, rootFolderId: string) {
+  const index = await listAccessibleDriveFiles(drive);
+  const childrenByParent = new Map<string, DriveFile[]>();
+
+  for (const file of index.files) {
+    for (const parentId of file.parents ?? []) {
+      const siblings = childrenByParent.get(parentId) ?? [];
+      siblings.push(file);
+      childrenByParent.set(parentId, siblings);
+    }
+  }
+
+  const folders: FolderQueueItem[] = [{ id: rootFolderId, path: '', depth: 0 }];
+  const files: ArchiveDriveFile[] = [];
+  let visitedFolders = 0;
+  let truncated = index.truncated;
+
+  while (folders.length > 0) {
+    const current = folders.shift();
+    if (!current) break;
+    visitedFolders += 1;
+
+    const children = childrenByParent.get(current.id) ?? [];
+    children.sort((a, b) => {
+      const folderOrder = Number(b.mimeType === FOLDER_MIME_TYPE) - Number(a.mimeType === FOLDER_MIME_TYPE);
+      if (folderOrder !== 0) return folderOrder;
+      return String(a.name ?? '').localeCompare(String(b.name ?? ''), 'ko-KR');
+    });
+
+    for (const child of children) {
+      const id = String(child.id ?? '');
+      const name = String(child.name ?? '');
+      if (!id || !name) continue;
+
+      const path = current.path ? `${current.path} / ${name}` : name;
+      files.push({
+        ...child,
+        path,
+        parentPath: current.path,
+        depth: current.depth + 1,
+      });
+
+      if (files.length >= MAX_DRIVE_ITEM_COUNT) {
+        truncated = true;
+        return { files, truncated, visitedFolders };
+      }
+
+      if (child.mimeType === FOLDER_MIME_TYPE) {
+        folders.push({ id, path, depth: current.depth + 1 });
+      }
+    }
+  }
+
+  return { files, truncated, visitedFolders };
+}
+
+async function collectArchiveFilesByTraversal(drive: drive_v3.Drive, rootFolderId: string) {
+  const folders: FolderQueueItem[] = [{ id: rootFolderId, path: '', depth: 0 }];
+  const files: ArchiveDriveFile[] = [];
+  let visitedFolders = 0;
+  let truncated = false;
+
+  while (folders.length > 0) {
+    if (visitedFolders >= MAX_DRIVE_FOLDER_COUNT) {
+      truncated = true;
+      break;
+    }
+
+    const batchSize = Math.min(
+      MAX_DRIVE_FOLDER_CONCURRENCY,
+      MAX_DRIVE_FOLDER_COUNT - visitedFolders,
+      folders.length,
+    );
+    const batch = folders.splice(0, batchSize);
+    visitedFolders += batch.length;
+
+    const batchResults = await Promise.all(
+      batch.map(async (current) => ({
+        current,
+        children: await listFolderChildren(drive, current.id),
+      })),
+    );
+
+    for (const { current, children } of batchResults) {
+      if (children.truncated) truncated = true;
+
+      for (const child of children.files) {
+        const id = String(child.id ?? '');
+        const name = String(child.name ?? '');
+        if (!id || !name) continue;
+
+        const path = current.path ? `${current.path} / ${name}` : name;
+        const item: ArchiveDriveFile = {
+          ...child,
+          path,
+          parentPath: current.path,
+          depth: current.depth + 1,
+        };
+        files.push(item);
+
+        if (files.length >= MAX_DRIVE_ITEM_COUNT) {
+          truncated = true;
+          return { files, truncated, visitedFolders };
+        }
+
+        if (child.mimeType === FOLDER_MIME_TYPE) {
+          if (current.depth < MAX_DRIVE_FOLDER_DEPTH) {
+            folders.push({ id, path, depth: current.depth + 1 });
+          } else {
+            truncated = true;
+          }
+        }
+      }
+    }
+  }
+
+  return { files, truncated, visitedFolders };
+}
+
+async function collectArchiveFiles(drive: drive_v3.Drive, rootFolderId: string) {
+  const indexed = await collectArchiveFilesFromIndex(drive, rootFolderId);
+  if (indexed.files.length > 0 || indexed.visitedFolders > 1) return indexed;
+
+  return collectArchiveFilesByTraversal(drive, rootFolderId);
+}
+
+function toArchiveFile(file: ArchiveDriveFile) {
   const mimeType = String(file.mimeType ?? '');
   const fileExtension = String(file.fileExtension ?? '');
 
@@ -144,6 +347,9 @@ function toArchiveFile(file: DriveFile) {
     size: file.size ? Number(file.size) : null,
     fileExtension,
     iconLink: String(file.iconLink ?? ''),
+    path: file.path,
+    parentPath: file.parentPath,
+    depth: file.depth,
   };
 }
 
@@ -159,34 +365,16 @@ export async function GET(req: NextRequest) {
 
     const folderId = env('GOOGLE_RECORDING_ARCHIVE_FOLDER_ID') || DEFAULT_RECORDING_ARCHIVE_FOLDER_ID;
     const drive = google.drive({ version: 'v3', auth });
-    const files: DriveFile[] = [];
-    let pageToken: string | undefined;
-    let pageCount = 0;
-
-    do {
-      const response = await drive.files.list({
-        q: `'${folderId.replace(/'/g, "\\'")}' in parents and trashed = false`,
-        pageSize: 1000,
-        pageToken,
-        orderBy: 'modifiedTime desc,name',
-        supportsAllDrives: true,
-        includeItemsFromAllDrives: true,
-        fields:
-          'nextPageToken, files(id,name,mimeType,webViewLink,webContentLink,createdTime,modifiedTime,size,fileExtension,iconLink)',
-      });
-
-      files.push(...((response.data.files as DriveFile[] | undefined) ?? []));
-      pageToken = response.data.nextPageToken ?? undefined;
-      pageCount += 1;
-    } while (pageToken && pageCount < 10);
+    const archive = await collectArchiveFiles(drive, folderId);
 
     return NextResponse.json({
       ok: true,
       folderId,
       folderUrl: folderId === DEFAULT_RECORDING_ARCHIVE_FOLDER_ID ? RECORDING_ARCHIVE_FOLDER_URL : `https://drive.google.com/drive/folders/${folderId}`,
       fetchedAt: new Date().toISOString(),
-      truncated: Boolean(pageToken),
-      files: files.map(toArchiveFile).filter((file) => file.id && file.name),
+      truncated: archive.truncated,
+      scannedFolders: archive.visitedFolders,
+      files: archive.files.map(toArchiveFile).filter((file) => file.id && file.name),
     });
   } catch (e: unknown) {
     const message = errorMessage(e);

@@ -22,6 +22,9 @@ type ArchiveFile = {
   size: number | null;
   fileExtension: string;
   iconLink: string;
+  path: string;
+  parentPath: string;
+  depth: number;
 };
 
 type ArchiveResponse = {
@@ -29,6 +32,7 @@ type ArchiveResponse = {
   folderUrl?: string;
   fetchedAt?: string;
   truncated?: boolean;
+  scannedFolders?: number;
   files?: ArchiveFile[];
   error?: string;
 };
@@ -110,7 +114,9 @@ function isWithinPeriod(value: string, period: PeriodFilter) {
 
 function sortFiles(files: ArchiveFile[], sortKey: SortKey) {
   return [...files].sort((a, b) => {
-    if (sortKey === 'nameAsc') return a.name.localeCompare(b.name, 'ko-KR');
+    const folderOrder = Number(a.category === 'folder') - Number(b.category === 'folder');
+    if (folderOrder !== 0) return folderOrder;
+    if (sortKey === 'nameAsc') return (a.path || a.name).localeCompare(b.path || b.name, 'ko-KR');
     if (sortKey === 'sizeDesc') return (b.size ?? -1) - (a.size ?? -1);
     return new Date(b.modifiedTime || 0).getTime() - new Date(a.modifiedTime || 0).getTime();
   });
@@ -136,6 +142,7 @@ export default function AdminRecordingArchivePage() {
   const [folderUrl, setFolderUrl] = useState('');
   const [fetchedAt, setFetchedAt] = useState('');
   const [truncated, setTruncated] = useState(false);
+  const [scannedFolders, setScannedFolders] = useState(0);
   const [query, setQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>('all');
   const [periodFilter, setPeriodFilter] = useState<PeriodFilter>('all');
@@ -161,6 +168,7 @@ export default function AdminRecordingArchivePage() {
       setFolderUrl(json.folderUrl ?? '');
       setFetchedAt(json.fetchedAt ?? '');
       setTruncated(Boolean(json.truncated));
+      setScannedFolders(json.scannedFolders ?? 0);
     } catch (error: unknown) {
       setErrorMsg(error instanceof Error ? error.message : '녹취 아카이브를 불러오지 못했습니다.');
     } finally {
@@ -232,11 +240,17 @@ export default function AdminRecordingArchivePage() {
       const periodMatches = isWithinPeriod(file.modifiedTime || file.createdTime, periodFilter);
       const queryMatches =
         !q ||
-        normalize(`${file.name} ${file.fileExtension} ${file.mimeType}`).includes(q);
+        normalize(`${file.name} ${file.path} ${file.parentPath} ${file.fileExtension} ${file.mimeType}`).includes(q);
       return categoryMatches && periodMatches && queryMatches;
     });
     return sortFiles(matched, sortKey);
   }, [categoryFilter, files, periodFilter, query, sortKey]);
+
+  const filteredFolderCount = useMemo(
+    () => filteredFiles.filter((file) => file.category === 'folder').length,
+    [filteredFiles],
+  );
+  const filteredFileCount = filteredFiles.length - filteredFolderCount;
 
   const onLogout = async () => {
     await supabase.auth.signOut();
@@ -271,7 +285,7 @@ export default function AdminRecordingArchivePage() {
         <section style={heroStyle}>
           <div style={{ minWidth: 0 }}>
             <h1 style={titleStyle}>녹취 아카이브</h1>
-            <p style={descStyle}>쿼터보드 지원 업체 녹취 파일 보관함</p>
+            <p style={descStyle}>쿼터보드 지원 업체 녹취 파일 보관함 · 하위 폴더 포함</p>
           </div>
           <div style={heroActionsStyle}>
             <button type="button" onClick={loadArchive} disabled={loading} style={primaryButtonStyle}>
@@ -289,10 +303,11 @@ export default function AdminRecordingArchivePage() {
         {truncated ? <div style={noticeBoxStyle}>파일이 많아 일부만 표시되었습니다. 검색 조건을 좁혀 확인해 주세요.</div> : null}
 
         <section style={statsGridStyle}>
-          <Stat label="전체" value={counts.all} />
+          <Stat label="전체 항목" value={counts.all} />
           <Stat label="오디오" value={counts.audio} />
           <Stat label="영상" value={counts.video} />
           <Stat label="문서" value={counts.document} />
+          <Stat label="폴더" value={counts.folder} />
         </section>
 
         <section style={filterPanelStyle} aria-label="녹취 파일 검색">
@@ -301,7 +316,7 @@ export default function AdminRecordingArchivePage() {
             <input
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="업체명, 담당자, 날짜, 확장자"
+              placeholder="업체명, 폴더명, 담당자, 날짜, 확장자"
               style={inputStyle}
             />
           </label>
@@ -337,8 +352,12 @@ export default function AdminRecordingArchivePage() {
 
         <section style={listPanelStyle}>
           <div style={listHeaderStyle}>
-            <b>파일 {filteredFiles.length}건</b>
-            <span>{fetchedAt ? `동기화 ${formatDateTime(fetchedAt)}` : ''}</span>
+            <b>항목 {filteredFiles.length}건</b>
+            <span>
+              파일 {filteredFileCount}건 · 폴더 {filteredFolderCount}건
+              {scannedFolders ? ` · 탐색 폴더 ${scannedFolders}개` : ''}
+              {fetchedAt ? ` · 동기화 ${formatDateTime(fetchedAt)}` : ''}
+            </span>
           </div>
 
           {loading ? (
@@ -350,20 +369,23 @@ export default function AdminRecordingArchivePage() {
               <table style={tableStyle}>
                 <thead>
                   <tr>
-                    <th style={thStyle}>파일명</th>
+                    <th style={thStyle}>파일명 / 위치</th>
                     <th style={thStyle}>유형</th>
                     <th style={thStyle}>수정일</th>
                     <th style={thStyle}>크기</th>
                     <th style={thStyle}>열람</th>
                   </tr>
                 </thead>
-                <tbody>
+                <tbody key={`${query}-${categoryFilter}-${periodFilter}-${sortKey}-${filteredFiles.length}`}>
                   {filteredFiles.map((file) => (
-                    <tr key={file.id}>
+                    <tr key={`${file.id}-${file.path}`}>
                       <td style={tdStyle}>
                         <div style={fileNameStyle}>
                           <span style={fileMarkerStyle}>{categoryLabels[file.category].slice(0, 1)}</span>
-                          <span>{file.name}</span>
+                          <span style={fileTextStyle}>
+                            <span>{file.name}</span>
+                            {file.parentPath ? <small style={pathStyle}>{file.parentPath}</small> : null}
+                          </span>
                         </div>
                       </td>
                       <td style={tdStyle}>
@@ -609,10 +631,26 @@ const tdStyle: CSSProperties = {
 const fileNameStyle: CSSProperties = {
   minWidth: 0,
   display: 'flex',
-  alignItems: 'center',
+  alignItems: 'flex-start',
   gap: 8,
   color: '#111827',
   fontWeight: 900,
+};
+
+const fileTextStyle: CSSProperties = {
+  minWidth: 0,
+  display: 'grid',
+  gap: 3,
+};
+
+const pathStyle: CSSProperties = {
+  overflow: 'hidden',
+  color: '#64748b',
+  fontSize: 11,
+  fontWeight: 800,
+  lineHeight: 1.35,
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap',
 };
 
 const fileMarkerStyle: CSSProperties = {
