@@ -167,6 +167,8 @@ type SupabaseErrorLike = {
 
 type ClipboardItemConstructor = new (items: Record<string, Blob>) => ClipboardItem;
 const APPLY_PAGE_SIZE = 100;
+const APPLY_LIMIT_SETTING_KEY = 'apply_limit_per_user_per_day';
+const RESET_APPLY_LIMIT_PER_USER_PER_DAY = 3;
 const fmtDT = (v?: string | null) => {
   if (!v) return '';
   const d = new Date(v);
@@ -996,7 +998,7 @@ const handleToggleReviewed = async (applicationId: string, checked: boolean) => 
     const { data, error } = await supabase
       .from('app_settings')
       .select('value_int')
-      .eq('key', 'apply_limit_per_user_per_day')
+      .eq('key', APPLY_LIMIT_SETTING_KEY)
       .maybeSingle();
 
     if (error) {
@@ -1172,7 +1174,7 @@ const loadLeaders = async () => {
     const { error } = await supabase
       .from('app_settings')
       .upsert(
-        { key: 'apply_limit_per_user_per_day', value_int: parsed },
+        { key: APPLY_LIMIT_SETTING_KEY, value_int: parsed },
         { onConflict: 'key' },
       );
 
@@ -1198,7 +1200,7 @@ const loadLeaders = async () => {
     pushToast('info', '');
     if (busyReset) return;
 
-    const ok = confirm('초기화하면 모든 지역 총 TO가 0이 되고, 지원 목록/녹취 파일이 전부 삭제됩니다. 진행할까요?');
+    const ok = confirm('초기화하면 모든 지역 총 TO가 0이 되고, 지원 목록/녹취 파일이 전부 삭제되며 1인당 하루 한도는 3으로 돌아갑니다. 진행할까요?');
     if (!ok) return;
 
     setBusyReset(true);
@@ -1231,9 +1233,23 @@ const loadLeaders = async () => {
         return;
       }
 
-      pushToast('success', '초기화 완료');
-      await loadStatus();
-      await loadApplies();
+      const { error: limitError } = await supabase
+        .from('app_settings')
+        .upsert(
+          { key: APPLY_LIMIT_SETTING_KEY, value_int: RESET_APPLY_LIMIT_PER_USER_PER_DAY },
+          { onConflict: 'key' },
+        );
+
+      if (limitError) {
+        setErrorMsg(`초기화는 완료됐지만 1인당 하루 한도 복구 실패: ${limitError.message}`);
+        await Promise.all([loadStatus(), loadApplies(), loadTodayCounts()]);
+        return;
+      }
+
+      setApplyLimit(RESET_APPLY_LIMIT_PER_USER_PER_DAY);
+      setApplyLimitInput(String(RESET_APPLY_LIMIT_PER_USER_PER_DAY));
+      pushToast('success', '초기화 완료 · 1인당 하루 한도 3명으로 복구');
+      await Promise.all([loadStatus(), loadApplies(), loadTodayCounts()]);
     } finally {
       setBusyReset(false);
     }
@@ -1668,6 +1684,7 @@ const copyBoardAsImage = async () => {
           onGoDashboard={() => router.push('/admin')}
           onGoPeople={() => router.push('/admin/people')}
           onGoWiki={() => router.push('/wiki')}
+          onGoRecordings={() => router.push('/admin/recordings')}
           onGoHr={() => router.push('/hr/calendar')}
           onLogout={doLogout}
         />

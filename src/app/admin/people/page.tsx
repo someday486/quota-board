@@ -475,6 +475,7 @@ export default function AdminPeoplePage() {
           onGoDashboard={() => router.push('/admin')}
           onGoPeople={() => router.push('/admin/people')}
           onGoWiki={() => router.push('/wiki')}
+          onGoRecordings={() => router.push('/admin/recordings')}
           onGoHr={() => router.push('/hr/calendar')}
           onLogout={doLogout}
         />
