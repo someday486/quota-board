@@ -118,9 +118,6 @@ export default function WikiClient({ categories, pages }: WikiClientProps) {
             <p>섭외센터 매뉴얼, TM 스크립트, 서비스 브로셔, 운영 규정을 한 곳에서 검색합니다.</p>
           </div>
           <div className={styles.headerActions}>
-            <button type="button" onClick={handlePrint} className={styles.secondaryButton}>
-              인쇄
-            </button>
             <button type="button" onClick={() => router.back()} className={styles.secondaryButton}>
               이전 화면
             </button>
@@ -219,7 +216,12 @@ export default function WikiClient({ categories, pages }: WikiClientProps) {
               <div className={styles.articleHeader}>
                 <div className={styles.articleIntro}>
                   <div className={styles.categoryLabel}>{activeCategory?.title ?? '문서'}</div>
-                  <h2>{activePage.title}</h2>
+                  <div className={styles.articleTitleRow}>
+                    <h2>{activePage.title}</h2>
+                    <button type="button" onClick={handlePrint} className={styles.articlePrintButton}>
+                      인쇄
+                    </button>
+                  </div>
                   <p>{activePage.summary}</p>
                 </div>
                 <div className={styles.visualPanel}>

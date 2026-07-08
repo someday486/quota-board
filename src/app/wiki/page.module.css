@@ -319,12 +319,38 @@
   font-weight: 900;
 }
 
-.articleHeader h2 {
+.articleTitleRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.articleTitleRow h2 {
   margin: 0;
   color: #111827;
   font-size: 28px;
   font-weight: 900;
   line-height: 1.25;
+}
+
+.articlePrintButton {
+  flex: 0 0 auto;
+  min-height: 34px;
+  border: 1px solid #111827;
+  border-radius: 8px;
+  background: #111827;
+  color: #ffffff;
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 900;
+  padding: 0 12px;
+  white-space: nowrap;
+}
+
+.articlePrintButton:hover {
+  background: #374151;
 }
 
 .articleHeader p {
@@ -769,7 +795,7 @@
     padding-right: 16px;
   }
 
-  .articleHeader h2 {
+  .articleTitleRow h2 {
     font-size: 23px;
   }
 }
@@ -801,7 +827,8 @@
   .searchPanel,
   .sidebar,
   .heroImage,
-  .related button {
+  .related button,
+  .articlePrintButton {
     display: none !important;
   }
 
@@ -840,7 +867,7 @@
     padding-top: 14px;
   }
 
-  .articleHeader h2 {
+  .articleTitleRow h2 {
     font-size: 24px;
   }
 

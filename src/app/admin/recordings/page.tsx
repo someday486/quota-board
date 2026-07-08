@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import AdminHeader from '../_components/AdminHeader';
@@ -134,6 +134,7 @@ async function getAccessToken() {
 
 export default function AdminRecordingArchivePage() {
   const router = useRouter();
+  const playbackUrlRef = useRef<string | null>(null);
   const [checking, setChecking] = useState(true);
   const [adminName, setAdminName] = useState('관리자');
   const [loading, setLoading] = useState(false);
@@ -147,6 +148,10 @@ export default function AdminRecordingArchivePage() {
   const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>('all');
   const [periodFilter, setPeriodFilter] = useState<PeriodFilter>('all');
   const [sortKey, setSortKey] = useState<SortKey>('modifiedDesc');
+  const [playerFile, setPlayerFile] = useState<ArchiveFile | null>(null);
+  const [playerUrl, setPlayerUrl] = useState('');
+  const [playerLoadingId, setPlayerLoadingId] = useState('');
+  const [playerError, setPlayerError] = useState('');
 
   const loadArchive = useCallback(async () => {
     setErrorMsg('');
@@ -174,6 +179,55 @@ export default function AdminRecordingArchivePage() {
     } finally {
       setLoading(false);
     }
+  }, []);
+
+  const closePlayer = useCallback(() => {
+    if (playbackUrlRef.current) {
+      URL.revokeObjectURL(playbackUrlRef.current);
+      playbackUrlRef.current = null;
+    }
+    setPlayerFile(null);
+    setPlayerUrl('');
+    setPlayerError('');
+    setPlayerLoadingId('');
+  }, []);
+
+  const loadPlayer = useCallback(async (file: ArchiveFile) => {
+    if (file.category !== 'audio' && file.category !== 'video') return;
+
+    setPlayerFile(file);
+    setPlayerUrl('');
+    setPlayerError('');
+    setPlayerLoadingId(file.id);
+
+    try {
+      const token = await getAccessToken();
+      if (!token) throw new Error('로그인이 만료되었습니다. 다시 로그인해 주세요.');
+
+      const response = await fetch(`/api/admin/recording-archive/media?fileId=${encodeURIComponent(file.id)}`, {
+        headers: { authorization: `Bearer ${token}` },
+      });
+      if (!response.ok) {
+        const json = (await response.json().catch(() => ({}))) as { error?: string };
+        throw new Error(json.error || '녹취 파일을 재생할 수 없습니다.');
+      }
+
+      const blob = await response.blob();
+      if (playbackUrlRef.current) URL.revokeObjectURL(playbackUrlRef.current);
+      const nextUrl = URL.createObjectURL(blob);
+      playbackUrlRef.current = nextUrl;
+      setPlayerUrl(nextUrl);
+    } catch (error: unknown) {
+      setPlayerError(error instanceof Error ? error.message : '녹취 파일을 재생할 수 없습니다.');
+    } finally {
+      setPlayerLoadingId('');
+    }
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (playbackUrlRef.current) URL.revokeObjectURL(playbackUrlRef.current);
+    };
   }, []);
 
   useEffect(() => {
@@ -350,6 +404,28 @@ export default function AdminRecordingArchivePage() {
           </label>
         </section>
 
+        {playerFile || playerError ? (
+          <section style={playerPanelStyle} aria-label="녹취 재생">
+            <div style={playerHeaderStyle}>
+              <div style={{ minWidth: 0 }}>
+                <b style={playerTitleStyle}>{playerFile?.name ?? '녹취 재생'}</b>
+                {playerFile?.parentPath ? <p style={playerMetaStyle}>{playerFile.parentPath}</p> : null}
+              </div>
+              <button type="button" onClick={closePlayer} style={closeButtonStyle}>
+                닫기
+              </button>
+            </div>
+            {playerError ? <div style={playerErrorStyle}>{playerError}</div> : null}
+            {playerLoadingId ? (
+              <div style={playerStatusStyle}>재생 파일을 준비하는 중입니다.</div>
+            ) : playerUrl && playerFile?.category === 'video' ? (
+              <video controls autoPlay src={playerUrl} style={videoStyle} />
+            ) : playerUrl ? (
+              <audio controls autoPlay src={playerUrl} style={audioStyle} />
+            ) : null}
+          </section>
+        ) : null}
+
         <section style={listPanelStyle}>
           <div style={listHeaderStyle}>
             <b>항목 {filteredFiles.length}건</b>
@@ -373,42 +449,59 @@ export default function AdminRecordingArchivePage() {
                     <th style={thStyle}>유형</th>
                     <th style={thStyle}>수정일</th>
                     <th style={thStyle}>크기</th>
-                    <th style={thStyle}>열람</th>
+                    <th style={thStyle}>재생/열람</th>
                   </tr>
                 </thead>
                 <tbody key={`${query}-${categoryFilter}-${periodFilter}-${sortKey}-${filteredFiles.length}`}>
-                  {filteredFiles.map((file) => (
-                    <tr key={`${file.id}-${file.path}`}>
-                      <td style={tdStyle}>
-                        <div style={fileNameStyle}>
-                          <span style={fileMarkerStyle}>{categoryLabels[file.category].slice(0, 1)}</span>
-                          <span style={fileTextStyle}>
-                            <span>{file.name}</span>
-                            {file.parentPath ? <small style={pathStyle}>{file.parentPath}</small> : null}
-                          </span>
-                        </div>
-                      </td>
-                      <td style={tdStyle}>
-                        <span style={badgeStyle}>{categoryLabels[file.category]}</span>
-                      </td>
-                      <td style={tdStyle}>{formatDateTime(file.modifiedTime || file.createdTime)}</td>
-                      <td style={tdStyle}>{formatBytes(file.size)}</td>
-                      <td style={tdStyle}>
-                        <div style={rowActionsStyle}>
-                          {file.webViewLink ? (
-                            <a href={file.webViewLink} target="_blank" rel="noreferrer" style={smallLinkStyle}>
-                              열기
-                            </a>
-                          ) : null}
-                          {file.webContentLink && file.category !== 'folder' ? (
-                            <a href={file.webContentLink} target="_blank" rel="noreferrer" style={smallLinkStyle}>
-                              다운로드
-                            </a>
-                          ) : null}
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                  {filteredFiles.map((file) => {
+                    const playable = file.category === 'audio' || file.category === 'video';
+                    const isCurrentPlayer = playerFile?.id === file.id;
+
+                    return (
+                      <tr key={`${file.id}-${file.path}`}>
+                        <td style={tdStyle}>
+                          <div style={fileNameStyle}>
+                            <span style={fileMarkerStyle}>{categoryLabels[file.category].slice(0, 1)}</span>
+                            <span style={fileTextStyle}>
+                              <span>{file.name}</span>
+                              {file.parentPath ? <small style={pathStyle}>{file.parentPath}</small> : null}
+                            </span>
+                          </div>
+                        </td>
+                        <td style={tdStyle}>
+                          <span style={badgeStyle}>{categoryLabels[file.category]}</span>
+                        </td>
+                        <td style={tdStyle}>{formatDateTime(file.modifiedTime || file.createdTime)}</td>
+                        <td style={tdStyle}>{formatBytes(file.size)}</td>
+                        <td style={tdStyle}>
+                          <div style={rowActionsStyle}>
+                            {playable ? (
+                              <button
+                                type="button"
+                                onClick={() => void loadPlayer(file)}
+                                disabled={playerLoadingId === file.id}
+                                style={{
+                                  ...smallButtonStyle,
+                                  ...(isCurrentPlayer ? activeSmallButtonStyle : {}),
+                                }}
+                              >
+                                {playerLoadingId === file.id ? '준비중' : isCurrentPlayer ? '재생중' : '재생'}
+                              </button>
+                            ) : file.webViewLink ? (
+                              <a href={file.webViewLink} target="_blank" rel="noreferrer" style={smallLinkStyle}>
+                                열기
+                              </a>
+                            ) : null}
+                            {file.webContentLink && file.category !== 'folder' ? (
+                              <a href={file.webContentLink} target="_blank" rel="noreferrer" style={smallLinkStyle}>
+                                다운로드
+                              </a>
+                            ) : null}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -553,6 +646,92 @@ const filterPanelStyle: CSSProperties = {
   borderRadius: 14,
   background: '#ffffff',
   padding: 14,
+};
+
+const playerPanelStyle: CSSProperties = {
+  marginTop: 12,
+  border: '1px solid #cbd5e1',
+  borderRadius: 14,
+  background: '#ffffff',
+  padding: 14,
+  boxShadow: '0 10px 30px rgba(17, 24, 39, 0.06)',
+};
+
+const playerHeaderStyle: CSSProperties = {
+  display: 'flex',
+  alignItems: 'flex-start',
+  justifyContent: 'space-between',
+  gap: 12,
+  marginBottom: 12,
+};
+
+const playerTitleStyle: CSSProperties = {
+  display: 'block',
+  overflow: 'hidden',
+  color: '#111827',
+  fontSize: 15,
+  fontWeight: 950,
+  lineHeight: 1.35,
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap',
+};
+
+const playerMetaStyle: CSSProperties = {
+  margin: '4px 0 0',
+  overflow: 'hidden',
+  color: '#64748b',
+  fontSize: 12,
+  fontWeight: 800,
+  lineHeight: 1.35,
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap',
+};
+
+const closeButtonStyle: CSSProperties = {
+  flex: '0 0 auto',
+  minHeight: 32,
+  border: '1px solid #cbd5e1',
+  borderRadius: 8,
+  background: '#ffffff',
+  color: '#111827',
+  padding: '0 10px',
+  fontSize: 12,
+  fontWeight: 900,
+  cursor: 'pointer',
+};
+
+const playerStatusStyle: CSSProperties = {
+  border: '1px solid #dbe3ee',
+  borderRadius: 10,
+  background: '#f8fafc',
+  color: '#475569',
+  padding: '12px 14px',
+  fontSize: 13,
+  fontWeight: 850,
+};
+
+const playerErrorStyle: CSSProperties = {
+  marginBottom: 10,
+  border: '1px solid #fecaca',
+  borderRadius: 10,
+  background: '#fff1f2',
+  color: '#991b1b',
+  padding: '10px 12px',
+  fontSize: 13,
+  fontWeight: 850,
+};
+
+const audioStyle: CSSProperties = {
+  display: 'block',
+  width: '100%',
+};
+
+const videoStyle: CSSProperties = {
+  display: 'block',
+  width: '100%',
+  maxHeight: 420,
+  borderRadius: 10,
+  background: '#0f172a',
 };
 
 const fieldStyle: CSSProperties = {
@@ -701,6 +880,17 @@ const smallLinkStyle: CSSProperties = {
   fontWeight: 900,
   textDecoration: 'none',
   whiteSpace: 'nowrap',
+};
+
+const smallButtonStyle: CSSProperties = {
+  ...smallLinkStyle,
+  cursor: 'pointer',
+};
+
+const activeSmallButtonStyle: CSSProperties = {
+  borderColor: '#111827',
+  background: '#111827',
+  color: '#ffffff',
 };
 
 const emptyStyle: CSSProperties = {
