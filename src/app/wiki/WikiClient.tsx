@@ -1,18 +1,23 @@
 'use client';
 
-import { useDeferredValue, useMemo, useState } from 'react';
+import { useDeferredValue, useEffect, useMemo, useState } from 'react';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import type { WikiCategory, WikiCategoryId, WikiPage } from '@/content/wiki';
+import { supabase } from '@/lib/supabase';
 import styles from './page.module.css';
 
-type WikiClientProps = {
+type WikiPayload = {
+  accessScope: 'full' | 'leader';
   categories: WikiCategory[];
   pages: WikiPage[];
+  error?: string;
 };
 
 const ALL_CATEGORIES = 'all';
 const DEFAULT_BASIS_DATE = '2026-07-07';
+const EMPTY_CATEGORIES: WikiCategory[] = [];
+const EMPTY_PAGES: WikiPage[] = [];
 
 function categoryImageSrc(categoryId: WikiCategoryId) {
   return `/wiki/${categoryId}.svg`;
@@ -66,12 +71,72 @@ function pageSearchText(page: WikiPage) {
     .toLowerCase();
 }
 
-export default function WikiClient({ categories, pages }: WikiClientProps) {
+export default function WikiClient() {
   const router = useRouter();
+  const [wikiData, setWikiData] = useState<WikiPayload | null>(null);
+  const [loadError, setLoadError] = useState('');
   const [query, setQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<WikiCategoryId | typeof ALL_CATEGORIES>(ALL_CATEGORIES);
-  const [activePageId, setActivePageId] = useState(pages[0]?.id ?? '');
+  const [activePageId, setActivePageId] = useState('');
   const deferredQuery = useDeferredValue(query);
+
+  const categories = wikiData?.categories ?? EMPTY_CATEGORIES;
+  const pages = wikiData?.pages ?? EMPTY_PAGES;
+
+  useEffect(() => {
+    let alive = true;
+
+    const loadWiki = async () => {
+      setLoadError('');
+      const { data } = await supabase.auth.getSession();
+      const token = data.session?.access_token;
+
+      if (!token) {
+        router.replace('/login');
+        return;
+      }
+
+      const res = await fetch('/api/wiki', {
+        headers: { authorization: `Bearer ${token}` },
+        cache: 'no-store',
+      });
+      const json = (await res.json().catch(() => null)) as WikiPayload | null;
+
+      if (!alive) return;
+
+      if (res.status === 401 || res.status === 403) {
+        router.replace('/login');
+        return;
+      }
+
+      if (!res.ok || !json) {
+        setLoadError(json?.error || '업무 위키를 불러오지 못했습니다.');
+        return;
+      }
+
+      const nextPages = Array.isArray(json.pages) ? json.pages : [];
+      const nextCategories = Array.isArray(json.categories) ? json.categories : [];
+      setWikiData({
+        accessScope: json.accessScope === 'full' ? 'full' : 'leader',
+        categories: nextCategories,
+        pages: nextPages,
+      });
+      setCategoryFilter((current) => {
+        if (current === ALL_CATEGORIES) return current;
+        return nextCategories.some((category) => category.id === current) ? current : ALL_CATEGORIES;
+      });
+      setActivePageId((current) => {
+        if (current && nextPages.some((page) => page.id === current)) return current;
+        return nextPages[0]?.id ?? '';
+      });
+    };
+
+    void loadWiki();
+
+    return () => {
+      alive = false;
+    };
+  }, [router]);
 
   const categoryById = useMemo(() => new Map(categories.map((category) => [category.id, category])), [categories]);
   const searchIndex = useMemo(() => pages.map((page) => ({ page, text: pageSearchText(page) })), [pages]);
@@ -105,6 +170,47 @@ export default function WikiClient({ categories, pages }: WikiClientProps) {
   const handlePrint = () => {
     window.print();
   };
+
+  if (!wikiData && !loadError) {
+    return (
+      <main className={styles.page} lang="ko-KR">
+        <div className={styles.shell}>
+          <header className={styles.header}>
+            <div className={styles.headerText}>
+              <div className={styles.titleRow}>
+                <h1>업무 위키</h1>
+                <span className={styles.dateBadge}>권한 확인 중</span>
+              </div>
+              <p>로그인 권한에 맞는 업무 위키 문서를 불러오고 있습니다.</p>
+            </div>
+          </header>
+        </div>
+      </main>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <main className={styles.page} lang="ko-KR">
+        <div className={styles.shell}>
+          <header className={styles.header}>
+            <div className={styles.headerText}>
+              <div className={styles.titleRow}>
+                <h1>업무 위키</h1>
+                <span className={styles.dateBadge}>오류</span>
+              </div>
+              <p>{loadError}</p>
+            </div>
+            <div className={styles.headerActions}>
+              <button type="button" onClick={() => router.back()} className={styles.secondaryButton}>
+                이전 화면
+              </button>
+            </div>
+          </header>
+        </div>
+      </main>
+    );
+  }
 
   return (
     <main className={styles.page} lang="ko-KR">
