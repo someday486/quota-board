@@ -15,6 +15,7 @@ type LiveApplyRow = {
   region_id: string;
   leader_name: string;
   company_name: string;
+  meeting_time_slot: MeetingTimeSlot | null;
   is_excluded: boolean;
   is_reserve: boolean;
   reviewed: boolean;
@@ -22,10 +23,13 @@ type LiveApplyRow = {
   reviewed_by: string | null;
 };
 
+type MeetingTimeSlot = 'am' | 'pm';
+
 type IntranetCheckStatus =
   | 'registered'
   | 'missing'
   | 'date_mismatch'
+  | 'time_mismatch'
   | 'multiple'
   | 'similar'
   | 'error';
@@ -51,6 +55,8 @@ type IntranetCheckResult = {
   status: IntranetCheckStatus;
   expectedApDate?: string;
   appliedDate?: string;
+  expectedTimeSlot?: MeetingTimeSlot;
+  matchedTimeSlot?: MeetingTimeSlot;
   matchCount?: number;
   matches?: IntranetCheckMatch[];
   reason?: string;
@@ -73,17 +79,24 @@ function intranetStatusLabel(status?: IntranetCheckStatus) {
   if (status === 'registered') return '등록완료';
   if (status === 'missing') return '미등록';
   if (status === 'date_mismatch') return '날짜확인';
+  if (status === 'time_mismatch') return '시간불일치';
   if (status === 'multiple') return '중복확인';
   if (status === 'similar') return '유사확인';
   if (status === 'error') return '오류';
   return '미확인';
 }
 
+function timeSlotLabel(slot?: MeetingTimeSlot | null) {
+  if (slot === 'am') return '오전';
+  if (slot === 'pm') return '오후';
+  return '-';
+}
+
 function reserveIntranetStatusStyle(status?: IntranetCheckStatus) {
   if (status === 'missing') {
     return { border: '#bbf7d0', background: '#f0fdf4', color: '#166534' };
   }
-  if (status === 'registered' || status === 'multiple' || status === 'error') {
+  if (status === 'registered' || status === 'multiple' || status === 'error' || status === 'time_mismatch') {
     return { border: '#fecaca', background: '#fef2f2', color: '#b91c1c' };
   }
   if (status === 'date_mismatch' || status === 'similar') {
@@ -98,6 +111,8 @@ function intranetStatusTitle(result?: IntranetCheckResult) {
     `상태: ${intranetStatusLabel(result.status)}`,
     result.expectedApDate ? `예상 미팅일: ${result.expectedApDate}` : '',
     result.appliedDate ? `신청일: ${result.appliedDate}` : '',
+    result.expectedTimeSlot ? `요청 시간대: ${timeSlotLabel(result.expectedTimeSlot)}` : '',
+    result.matchedTimeSlot ? `인트라넷 시간대: ${timeSlotLabel(result.matchedTimeSlot)}` : '',
   ].filter(Boolean);
   for (const match of result.matches ?? []) {
     const address = match.address || [match.region1, match.region2].filter(Boolean).join(' ');
@@ -223,11 +238,12 @@ export default function ReserveList({
           background: '#fff',
         }}
       >
-        <table style={{ width: '100%', minWidth: 960, borderCollapse: 'collapse', fontSize: isMobile ? 13 : 14 }}>
+        <table style={{ width: '100%', minWidth: 1030, borderCollapse: 'collapse', fontSize: isMobile ? 13 : 14 }}>
           <thead>
             <tr style={{ background: '#f6f7f9' }}>
               <th style={{ ...thSmall, width: 140 }}>시간</th>
               <th style={{ ...thSmall, width: 70 }}>지역</th>
+              <th style={{ ...thSmall, width: 70, textAlign: 'center' }}>시간대</th>
               <th style={{ ...thSmall, width: 90 }}>팀장</th>
               <th style={thSmall}>기업명</th>
               <th style={{ ...thSmall, width: 118, textAlign: 'center' }}>인트라넷</th>
@@ -246,6 +262,7 @@ export default function ReserveList({
                 <tr key={a.id} style={{ borderTop: '1px solid #eee', background: isRegisteredIntranet ? '#fff1f2' : a.is_excluded ? '#f8fafc' : '#ffffff' }}>
                   <td style={{ ...tdSmall, width: 140, whiteSpace: 'nowrap' }}>{formatDateTime(a.created_at)}</td>
                   <td style={{ ...tdSmall, width: 70, whiteSpace: 'nowrap' }}>{rn}</td>
+                  <td style={{ ...tdSmall, width: 70, textAlign: 'center', whiteSpace: 'nowrap', fontWeight: 900 }}>{timeSlotLabel(a.meeting_time_slot)}</td>
                   <td style={{ ...tdSmall, width: 90, whiteSpace: 'nowrap', fontWeight: 900 }}>{a.leader_name}</td>
                   <td style={tdSmall}>
                     <span
@@ -333,7 +350,7 @@ export default function ReserveList({
 
             {reserveApplies.length === 0 && (
               <tr>
-                <td colSpan={8} style={{ padding: 12, color: '#666', textAlign: 'center' }}>
+                <td colSpan={9} style={{ padding: 12, color: '#666', textAlign: 'center' }}>
                   예비 등록 내역이 없습니다.
                 </td>
               </tr>

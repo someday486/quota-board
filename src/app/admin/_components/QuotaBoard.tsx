@@ -7,7 +7,10 @@ import { useIsMobile } from '@/hooks/useIsMobile';
 type BoardCell = {
   leader_name: string;
   company_name: string;
+  meeting_time_slot: MeetingTimeSlot | null;
 };
+
+type MeetingTimeSlot = 'am' | 'pm';
 
 type RegionOrderedRow = {
   id: string;
@@ -22,6 +25,12 @@ type QuotaBoardProps = {
   regionsOrdered: RegionOrderedRow[];
   boardByRegionId: Map<string, BoardCell[]>;
 };
+
+function timeSlotLabel(slot?: MeetingTimeSlot | null) {
+  if (slot === 'am') return '오전';
+  if (slot === 'pm') return '오후';
+  return '-';
+}
 
 export default function QuotaBoard({
   boardRef,
@@ -103,6 +112,7 @@ export default function QuotaBoard({
                             {c ? (
                               <div style={{ lineHeight: 1.35, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
                                 <div style={{ fontWeight: 900 }}>{c.leader_name}</div>
+                                <div style={{ color: '#0f172a', fontSize: 11, fontWeight: 900 }}>{timeSlotLabel(c.meeting_time_slot)}</div>
                                 <div style={{ color: '#333' }}>{c.company_name}</div>
                               </div>
                             ) : (

@@ -16,6 +16,7 @@ type CheckRow = {
   applicationId: string;
   appliedAt: string;
   appliedDate?: string;
+  meetingTimeSlot?: string | null;
   leaderName: string;
   regionName: string;
   companyName: string;
@@ -41,6 +42,7 @@ type IntranetCheckStatus =
   | 'registered'
   | 'missing'
   | 'date_mismatch'
+  | 'time_mismatch'
   | 'multiple'
   | 'similar'
   | 'error';
@@ -50,15 +52,20 @@ type IntranetCheckResult = {
   status: IntranetCheckStatus;
   expectedApDate?: string;
   appliedDate?: string;
+  expectedTimeSlot?: MeetingTimeSlot;
+  matchedTimeSlot?: MeetingTimeSlot;
   matchCount?: number;
   matches?: unknown[];
   reason?: string;
 };
 
+type MeetingTimeSlot = 'am' | 'pm';
+
 const INTRANET_CHECK_STATUSES = new Set<IntranetCheckStatus>([
   'registered',
   'missing',
   'date_mismatch',
+  'time_mismatch',
   'multiple',
   'similar',
   'error',
@@ -96,6 +103,27 @@ function normalizeIntranetStatus(value: unknown): IntranetCheckStatus {
   return typeof value === 'string' && INTRANET_CHECK_STATUSES.has(value as IntranetCheckStatus)
     ? (value as IntranetCheckStatus)
     : 'error';
+}
+
+function normalizeTimeSlot(value: unknown): MeetingTimeSlot | undefined {
+  const raw = String(value ?? '').trim().toLowerCase();
+  if (raw === 'am' || raw === '오전') return 'am';
+  if (raw === 'pm' || raw === '오후') return 'pm';
+  return undefined;
+}
+
+function timeSlotFromApTime(value: unknown): MeetingTimeSlot | undefined {
+  const raw = String(value ?? '').trim();
+  if (!raw) return undefined;
+  const lower = raw.toLowerCase();
+  if (raw.includes('오전') || lower.includes('am')) return 'am';
+  if (raw.includes('오후') || lower.includes('pm')) return 'pm';
+
+  const hourMatch = /(?:^|\D)(\d{1,2})(?::\d{2})?/.exec(raw);
+  if (!hourMatch) return undefined;
+  const hour = Number(hourMatch[1]);
+  if (!Number.isFinite(hour) || hour < 0 || hour > 23) return undefined;
+  return hour < 12 ? 'am' : 'pm';
 }
 
 function formatKstDate(value: string) {
@@ -203,6 +231,7 @@ function normalizeCheckResults(
     applicationId: string;
     appliedAt: string;
     appliedDate: string;
+    meetingTimeSlot?: MeetingTimeSlot;
     leaderName: string;
     regionName: string;
     companyName: string;
@@ -227,12 +256,40 @@ function normalizeCheckResults(
     .filter((row) => row.applicationId)
     .map((row) => {
       const result = resultsById.get(row.applicationId);
-      if (result) return result;
+      if (result) {
+        const expectedTimeSlot = row.meetingTimeSlot ?? normalizeTimeSlot(result.expectedTimeSlot);
+        const matches = Array.isArray(result.matches) ? result.matches : [];
+        const matchedSlots = matches
+          .map((match) => (isRecord(match) ? timeSlotFromApTime(match.apTime) : undefined))
+          .filter((slot): slot is MeetingTimeSlot => Boolean(slot));
+
+        if (
+          expectedTimeSlot &&
+          matchedSlots.length > 0 &&
+          (result.status === 'registered' || result.status === 'multiple' || result.status === 'similar') &&
+          !matchedSlots.includes(expectedTimeSlot)
+        ) {
+          return {
+            ...result,
+            status: 'time_mismatch',
+            expectedTimeSlot,
+            matchedTimeSlot: matchedSlots[0],
+            reason: 'time_slot_mismatch',
+          };
+        }
+
+        return {
+          ...result,
+          expectedTimeSlot,
+          matchedTimeSlot: matchedSlots[0] ?? result.matchedTimeSlot,
+        };
+      }
       return {
         applicationId: row.applicationId,
         status: 'missing',
         expectedApDate: row.appliedDate,
         appliedDate: row.appliedDate,
+        expectedTimeSlot: row.meetingTimeSlot,
         matchCount: 0,
         matches: [],
         reason: 'not_found_in_latest_check',
@@ -300,6 +357,7 @@ export async function POST(req: NextRequest) {
       applicationId: String(row.applicationId ?? ''),
       appliedAt: String(row.appliedAt ?? ''),
       appliedDate: row.appliedDate || formatKstDate(String(row.appliedAt ?? '')),
+      meetingTimeSlot: normalizeTimeSlot(row.meetingTimeSlot),
       leaderName: String(row.leaderName ?? '').trim(),
       regionName: String(row.regionName ?? '').trim(),
       companyName: String(row.companyName ?? '').trim(),

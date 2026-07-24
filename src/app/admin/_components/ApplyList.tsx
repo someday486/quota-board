@@ -22,6 +22,7 @@ type LiveApplyRow = {
   region_id: string;
   leader_name: string;
   company_name: string;
+  meeting_time_slot: MeetingTimeSlot | null;
   is_excluded: boolean;
   is_reserve: boolean;
   reviewed: boolean;
@@ -29,10 +30,13 @@ type LiveApplyRow = {
   reviewed_by: string | null;
 };
 
+type MeetingTimeSlot = 'am' | 'pm';
+
 type IntranetCheckStatus =
   | 'registered'
   | 'missing'
   | 'date_mismatch'
+  | 'time_mismatch'
   | 'multiple'
   | 'similar'
   | 'error';
@@ -58,6 +62,8 @@ type IntranetCheckResult = {
   status: IntranetCheckStatus;
   expectedApDate?: string;
   appliedDate?: string;
+  expectedTimeSlot?: MeetingTimeSlot;
+  matchedTimeSlot?: MeetingTimeSlot;
   matchCount?: number;
   matches?: IntranetCheckMatch[];
   reason?: string;
@@ -97,17 +103,24 @@ function intranetStatusLabel(status?: IntranetCheckStatus) {
   if (status === 'registered') return '등록완료';
   if (status === 'missing') return '미등록';
   if (status === 'date_mismatch') return '날짜확인';
+  if (status === 'time_mismatch') return '시간불일치';
   if (status === 'multiple') return '중복확인';
   if (status === 'similar') return '유사확인';
   if (status === 'error') return '오류';
   return '미확인';
 }
 
+function timeSlotLabel(slot?: MeetingTimeSlot | null) {
+  if (slot === 'am') return '오전';
+  if (slot === 'pm') return '오후';
+  return '-';
+}
+
 function intranetStatusStyle(status?: IntranetCheckStatus) {
   if (status === 'registered') {
     return { border: '#bbf7d0', background: '#f0fdf4', color: '#166534' };
   }
-  if (status === 'missing' || status === 'error') {
+  if (status === 'missing' || status === 'error' || status === 'time_mismatch') {
     return { border: '#fecaca', background: '#fef2f2', color: '#b91c1c' };
   }
   if (status === 'date_mismatch' || status === 'multiple' || status === 'similar') {
@@ -122,6 +135,8 @@ function intranetStatusTitle(result?: IntranetCheckResult) {
     `상태: ${intranetStatusLabel(result.status)}`,
     result.expectedApDate ? `예상 미팅일: ${result.expectedApDate}` : '',
     result.appliedDate ? `신청일: ${result.appliedDate}` : '',
+    result.expectedTimeSlot ? `요청 시간대: ${timeSlotLabel(result.expectedTimeSlot)}` : '',
+    result.matchedTimeSlot ? `인트라넷 시간대: ${timeSlotLabel(result.matchedTimeSlot)}` : '',
   ].filter(Boolean);
   for (const match of result.matches ?? []) {
     const address = match.address || [match.region1, match.region2].filter(Boolean).join(' ');
@@ -233,12 +248,13 @@ export default function ApplyList({
     if (displayedApplies.length === 0) return;
 
     const rows: string[][] = [
-      ['신청시각', '지역', '팀장', '기업명', '인트라넷상태', '예상미팅일', '제외여부'],
+      ['신청시각', '지역', '시간대', '팀장', '기업명', '인트라넷상태', '예상미팅일', '제외여부'],
       ...displayedApplies.map((a) => {
         const intranet = intranetStatusByAppId[a.id];
         return [
           formatDateTime(a.created_at),
           regionsMap.get(a.region_id)?.region_name ?? a.region_id,
+          timeSlotLabel(a.meeting_time_slot),
           a.leader_name ?? '',
           a.company_name ?? '',
           intranetStatusLabel(intranet?.status),
@@ -253,7 +269,7 @@ export default function ApplyList({
       const wb = XLSX.utils.book_new();
       const ws = XLSX.utils.aoa_to_sheet(rows);
 
-      ws['!cols'] = [{ wch: 22 }, { wch: 12 }, { wch: 14 }, { wch: 28 }, { wch: 14 }, { wch: 14 }, { wch: 12 }];
+      ws['!cols'] = [{ wch: 22 }, { wch: 12 }, { wch: 10 }, { wch: 14 }, { wch: 28 }, { wch: 14 }, { wch: 14 }, { wch: 12 }];
 
       XLSX.utils.book_append_sheet(wb, ws, '팀장지원목록');
       const out = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
@@ -448,13 +464,14 @@ export default function ApplyList({
               fontSize: isMobile ? 13 : 14,
               tableLayout: 'fixed',
               width: '100%',
-              minWidth: 900,
+              minWidth: 980,
             }}
           >
             <thead>
               <tr style={{ background: '#f6f7f9', borderBottom: '1px solid #eee' }}>
                 <th style={{ ...thSmall, width: 140, textAlign: 'center' }}>시간</th>
                 <th style={{ ...thSmall, width: 70, textAlign: 'center' }}>지역</th>
+                <th style={{ ...thSmall, width: 70, textAlign: 'center' }}>시간대</th>
                 <th style={{ ...thSmall, width: 90, textAlign: 'center' }}>팀장</th>
                 <th style={{ ...thSmall }}>기업명</th>
                 <th style={{ ...thSmall, width: 118, textAlign: 'center' }}>인트라넷</th>
@@ -471,6 +488,7 @@ export default function ApplyList({
                   <tr key={a.id} style={{ borderTop: '1px solid #eee', background: a.is_excluded ? '#f8fafc' : '#ffffff' }}>
                     <td style={{ ...tdSmall, width: 140, textAlign: 'center' }}>{formatDateTime(a.created_at)}</td>
                     <td style={{ ...tdSmall, width: 70, textAlign: 'center' }}>{rn}</td>
+                    <td style={{ ...tdSmall, width: 70, textAlign: 'center', fontWeight: 900 }}>{timeSlotLabel(a.meeting_time_slot)}</td>
                     <td style={{ ...tdSmall, width: 90, textAlign: 'center' }}>
                       <b>{a.leader_name}</b>
                     </td>
@@ -616,7 +634,7 @@ export default function ApplyList({
 
               {displayedApplies.length === 0 && (
                 <tr>
-                  <td colSpan={8} style={{ padding: 12, color: '#666', textAlign: 'center' }}>
+                  <td colSpan={9} style={{ padding: 12, color: '#666', textAlign: 'center' }}>
                     표시할 지원 내역이 없습니다.
                   </td>
                 </tr>

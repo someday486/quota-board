@@ -21,8 +21,11 @@ type MyApplyRow = {
   region_id: string;
   leader_name: string;
   company_name: string;
+  meeting_time_slot: MeetingTimeSlot | null;
   is_reserve: boolean;
 };
+
+type MeetingTimeSlot = 'am' | 'pm';
 
 type RegionRow = {
   id: string;
@@ -73,6 +76,12 @@ const LIMIT_SETTING_KEY = 'apply_limit_per_user_per_day';
 const EXEMPT_SETTING_KEY = 'apply_limit_exempt_user_ids';
 const GROUP_SETTING_KEY = 'active_leader_group'; // 0=전체, 1=1조, 2=2조
 
+function timeSlotLabel(slot?: MeetingTimeSlot | null) {
+  if (slot === 'am') return '오전';
+  if (slot === 'pm') return '오후';
+  return '-';
+}
+
 function getLocalDayRangeISO() {
   const start = new Date();
   start.setHours(0, 0, 0, 0);
@@ -114,6 +123,7 @@ export default function LeaderPage() {
   const [regionsMap, setRegionsMap] = useState<Map<string, RegionRow>>(new Map());
   const [statusRows, setStatusRows] = useState<RegionStatusRow[]>([]);
   const [companyByRegionId, setCompanyByRegionId] = useState<Record<string, string>>({});
+  const [timeSlotByRegionId, setTimeSlotByRegionId] = useState<Record<string, MeetingTimeSlot | ''>>({});
   const [rowNoticeByRegionId, setRowNoticeByRegionId] = useState<Record<string, RowNotice | undefined>>({});
   const [busyRegionId, setBusyRegionId] = useState<string | null>(null);
 
@@ -123,6 +133,7 @@ export default function LeaderPage() {
   const [reserveOpen, setReserveOpen] = useState(false);
   const [reserveRegionId, setReserveRegionId] = useState<string>('');
   const [reserveCompany, setReserveCompany] = useState<string>('');
+  const [reserveTimeSlot, setReserveTimeSlot] = useState<MeetingTimeSlot | ''>('');
   const [busyReserve, setBusyReserve] = useState<boolean>(false);
 
   // 공통 1인당 하루 한도(0이면 무제한)
@@ -229,6 +240,24 @@ export default function LeaderPage() {
     }
   };
 
+  const saveApplicationTimeSlot = async (applicationId: string, timeSlot: MeetingTimeSlot) => {
+    const token = await getAccessToken();
+    if (!token) throw new Error('인증 토큰을 확인할 수 없습니다. 다시 로그인해 주세요.');
+
+    const res = await fetch('/api/applications/time-slot', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ applicationId, timeSlot }),
+    });
+    const json = (await res.json().catch(() => null)) as { error?: string } | null;
+    if (!res.ok) {
+      throw new Error(json?.error || '시간대 저장에 실패했습니다.');
+    }
+  };
+
   const loadRegions = async () => {
     const { data, error } = await supabase
       .from('regions')
@@ -265,12 +294,17 @@ export default function LeaderPage() {
       for (const r of list) if (next[r.region_id] === undefined) next[r.region_id] = '';
       return next;
     });
+    setTimeSlotByRegionId((prev) => {
+      const next = { ...prev };
+      for (const r of list) if (next[r.region_id] === undefined) next[r.region_id] = '';
+      return next;
+    });
   };
 
   const loadMyApplies = async (uid: string) => {
     const { data, error } = await supabase
       .from('applications_live')
-      .select('id, created_at, region_id, leader_name, company_name, is_reserve')
+      .select('id, created_at, region_id, leader_name, company_name, meeting_time_slot, is_reserve')
       .eq('user_id', uid)
       .order('created_at', { ascending: false })
       .limit(100);
@@ -451,6 +485,7 @@ export default function LeaderPage() {
     if (busyRegionId) return;
 
     const c = (companyByRegionId[regionId] ?? '').trim();
+    const timeSlot = timeSlotByRegionId[regionId] ?? '';
     const failWithCompany = (message: string) => {
       const label = c ? `${c} 지원 실패` : '지원 실패';
       showRowNotice(regionId, { type: 'error', text: `${label}: ${message}` });
@@ -475,6 +510,11 @@ export default function LeaderPage() {
 
     if (!c) {
       failWithCompany('기업명을 입력하세요.');
+      return;
+    }
+
+    if (timeSlot !== 'am' && timeSlot !== 'pm') {
+      failWithCompany('방문 시간대를 오전/오후 중에서 선택해 주세요.');
       return;
     }
 
@@ -515,6 +555,16 @@ export default function LeaderPage() {
         newAppliedAt = (latest as InsertedApplyRow | null)?.created_at ?? null;
       }
 
+      if (newApplicationId) {
+        try {
+          await saveApplicationTimeSlot(newApplicationId, timeSlot);
+        } catch (e: unknown) {
+          const message = e instanceof Error ? e.message : '시간대 저장에 실패했습니다.';
+          showRowNotice(regionId, { type: 'warning', text: `${c} 지원은 완료됐지만 시간대 저장 실패: ${message}` });
+          setErrorMsg(`지원은 완료됐지만 시간대 저장 실패: ${message}`);
+        }
+      }
+
       await appendSupportLog({
         event_type: 'APPLY',
         applied_at: newAppliedAt,
@@ -525,7 +575,7 @@ export default function LeaderPage() {
         company_name: c,
         is_reserve: false,
         is_excluded: false,
-        note: 'team_apply',
+        note: `team_apply:${timeSlot}`,
       });
 
       await loadStatus();
@@ -533,6 +583,7 @@ export default function LeaderPage() {
       if (u?.user) {
         await Promise.all([loadMyApplies(u.user.id), loadMyTodayCount(u.user.id)]);
       }
+      setTimeSlotByRegionId((prev) => ({ ...prev, [regionId]: '' }));
     } else if (result === 'CLOSED') {
       const closedMessage = `${c} 지원 실패: 방금 마감되었습니다. 현재 현황을 다시 불러왔습니다.`;
       showRowNotice(regionId, { type: 'warning', text: closedMessage });
@@ -559,6 +610,7 @@ export default function LeaderPage() {
     const first = closedRegions[0]?.region_id ?? '';
     setReserveRegionId(first);
     setReserveCompany('');
+    setReserveTimeSlot('');
     setReserveOpen(true);
   };
 
@@ -597,6 +649,11 @@ export default function LeaderPage() {
       return;
     }
 
+    if (reserveTimeSlot !== 'am' && reserveTimeSlot !== 'pm') {
+      setErrorMsg('방문 시간대를 오전/오후 중에서 선택해 주세요.');
+      return;
+    }
+
     if (!myUserId) {
       router.replace('/login');
       return;
@@ -611,6 +668,7 @@ export default function LeaderPage() {
           leader_name: leaderName,
           region_id: rid,
           company_name: c,
+          meeting_time_slot: reserveTimeSlot,
           is_reserve: true,
           is_excluded: false,
         })
@@ -632,12 +690,13 @@ export default function LeaderPage() {
         company_name: c,
         is_reserve: true,
         is_excluded: false,
-        note: 'team_reserve_apply',
+        note: `team_reserve_apply:${reserveTimeSlot}`,
       });
 
       showToast('success', '예비 등록 완료');
       setReserveOpen(false);
       setReserveCompany('');
+      setReserveTimeSlot('');
       await Promise.all([loadMyApplies(myUserId), loadMyTodayCount(myUserId)]);
     } finally {
       setBusyReserve(false);
@@ -1087,13 +1146,14 @@ export default function LeaderPage() {
           </div>
 
           <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', minWidth: 720, borderCollapse: 'collapse', fontSize: isMobile ? 13 : 14 }}>
+          <table style={{ width: '100%', minWidth: 820, borderCollapse: 'collapse', fontSize: isMobile ? 13 : 14 }}>
             <thead>
               <tr style={{ background: '#f8fafc' }}>
                 <th style={{ ...thBig, textAlign: 'center' }}>지역</th>
                 <th style={{ ...th, textAlign: 'right' }}>총 배정(TO)</th>
                 <th style={{ ...th, textAlign: 'right' }}>남은 수량</th>
                 <th style={{ ...th, textAlign: 'center' }}>상태</th>
+                <th style={{ ...th, textAlign: 'center' }}>시간대</th>
                 <th style={tdBig}>기업명</th>
                 <th style={{ ...th, textAlign: 'center' }}>지원</th>
               </tr>
@@ -1105,6 +1165,7 @@ export default function LeaderPage() {
                 const isBusy = busyRegionId === r.region_id;
                 const disabled = closed || isBusy || limitBlocked || groupBlocked || restrictionBlocked;
                 const rowNotice = rowNoticeByRegionId[r.region_id];
+                const selectedTimeSlot = timeSlotByRegionId[r.region_id] ?? '';
                 if (r.capacity_total === 0) return null;
 
                 return (
@@ -1128,6 +1189,36 @@ export default function LeaderPage() {
 
                       <td style={{ ...td, textAlign: 'center' }}>
                         <span style={closed ? pillClosed : pillOpen}>{closed ? '마감' : '진행중'}</span>
+                      </td>
+
+                      <td style={{ ...td, textAlign: 'center' }}>
+                        <div style={{ display: 'inline-flex', gap: 4, whiteSpace: 'nowrap' }}>
+                          {(['am', 'pm'] as const).map((slot) => {
+                            const selected = selectedTimeSlot === slot;
+                            return (
+                              <button
+                                key={slot}
+                                type="button"
+                                onClick={() => setTimeSlotByRegionId((prev) => ({ ...prev, [r.region_id]: slot }))}
+                                disabled={disabled}
+                                style={{
+                                  height: 32,
+                                  minWidth: 42,
+                                  padding: '0 8px',
+                                  borderRadius: 10,
+                                  border: selected ? '1px solid #111827' : '1px solid #cbd5e1',
+                                  background: selected ? '#111827' : '#ffffff',
+                                  color: selected ? '#ffffff' : '#334155',
+                                  fontWeight: 900,
+                                  cursor: disabled ? 'not-allowed' : 'pointer',
+                                  opacity: disabled ? 0.55 : 1,
+                                }}
+                              >
+                                {timeSlotLabel(slot)}
+                              </button>
+                            );
+                          })}
+                        </div>
                       </td>
 
                       <td style={td}>
@@ -1192,7 +1283,7 @@ export default function LeaderPage() {
                     </tr>
                     {rowNotice && (
                       <tr>
-                        <td colSpan={6} style={tdNoticeWrap}>
+                        <td colSpan={7} style={tdNoticeWrap}>
                           <div style={{ ...rowNoticeBox, ...rowNoticeTone[rowNotice.type] }}>
                             {rowNotice.text}
                           </div>
@@ -1205,7 +1296,7 @@ export default function LeaderPage() {
 
               {statusRows.length === 0 && (
                 <tr>
-                  <td colSpan={6} style={{ padding: 14, color: '#64748b', fontWeight: 800 }}>
+                  <td colSpan={7} style={{ padding: 14, color: '#64748b', fontWeight: 800 }}>
                     데이터가 없습니다. (region_status_view 확인)
                   </td>
                 </tr>
@@ -1227,11 +1318,12 @@ export default function LeaderPage() {
           </div>
 
           <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', minWidth: 520, borderCollapse: 'collapse', fontSize: 13 }}>
+          <table style={{ width: '100%', minWidth: 600, borderCollapse: 'collapse', fontSize: 13 }}>
             <thead>
               <tr style={{ background: '#f8fafc' }}>
                 <th style={thSmall}>시간</th>
                 <th style={thSmall}>지역</th>
+                <th style={thSmall}>시간대</th>
                 <th style={thSmall}>기업명</th>
               </tr>
             </thead>
@@ -1242,6 +1334,7 @@ export default function LeaderPage() {
                   <tr key={a.id} style={{ borderTop: '1px solid #eef2f7' }}>
                     <td style={tdSmall}>{new Date(a.created_at).toLocaleString()}</td>
                     <td style={tdSmall}>{rn}</td>
+                    <td style={tdSmall}>{timeSlotLabel(a.meeting_time_slot)}</td>
                     <td style={tdSmall}>
                       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                         {a.is_reserve ? (
@@ -1269,7 +1362,7 @@ export default function LeaderPage() {
 
               {myApplies.length === 0 && (
                 <tr>
-                  <td colSpan={3} style={{ padding: 12, color: '#64748b', fontWeight: 800 }}>
+                  <td colSpan={4} style={{ padding: 12, color: '#64748b', fontWeight: 800 }}>
                     지원 내역이 없습니다.
                   </td>
                 </tr>
@@ -1389,6 +1482,33 @@ export default function LeaderPage() {
                     }}
                   />
                 </div>
+
+                <div>
+                  <div style={{ fontSize: 12, color: '#64748b', fontWeight: 900, marginBottom: 6 }}>시간대</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                    {(['am', 'pm'] as const).map((slot) => {
+                      const selected = reserveTimeSlot === slot;
+                      return (
+                        <button
+                          key={slot}
+                          type="button"
+                          onClick={() => setReserveTimeSlot(slot)}
+                          style={{
+                            height: 40,
+                            borderRadius: 12,
+                            border: selected ? '1px solid #111827' : '1px solid #cbd5e1',
+                            background: selected ? '#111827' : '#ffffff',
+                            color: selected ? '#ffffff' : '#334155',
+                            fontWeight: 900,
+                            cursor: 'pointer',
+                          }}
+                        >
+                          {timeSlotLabel(slot)}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
               </div>
 
               <div style={{ padding: 16, borderTop: '1px solid #eef2f7', display: 'flex', justifyContent: 'flex-end', gap: 10, flexDirection: isMobile ? 'column' : 'row' }}>
@@ -1399,7 +1519,7 @@ export default function LeaderPage() {
                   type="button"
                   onClick={submitReserve}
                   style={{ ...btnPrimary, height: 38, minWidth: 120, ...(isMobile ? { width: '100%' } : {}) }}
-                  disabled={busyReserve || closedRegions.length === 0 || limitBlocked || groupBlocked || restrictionBlocked}
+                  disabled={busyReserve || closedRegions.length === 0 || !reserveTimeSlot || limitBlocked || groupBlocked || restrictionBlocked}
                 >
                   {busyReserve ? '등록중…' : '예비 등록'}
                 </button>

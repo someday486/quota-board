@@ -43,12 +43,15 @@ type LiveApplyRow = {
   region_id: string;
   leader_name: string;
   company_name: string;
+  meeting_time_slot: MeetingTimeSlot | null;
   is_excluded: boolean;
   is_reserve: boolean;
   reviewed: boolean;
   reviewed_at: string | null;
   reviewed_by: string | null;
 };
+
+type MeetingTimeSlot = 'am' | 'pm';
 
 type SupportLogPayload = {
   event_type: 'APPLY' | 'RESERVE_APPLY' | 'DELETE' | 'EXCEPTION_ON' | 'EXCEPTION_OFF';
@@ -67,6 +70,7 @@ type IntranetCheckStatus =
   | 'registered'
   | 'missing'
   | 'date_mismatch'
+  | 'time_mismatch'
   | 'multiple'
   | 'similar'
   | 'error';
@@ -92,6 +96,8 @@ type IntranetCheckResult = {
   status: IntranetCheckStatus;
   expectedApDate?: string;
   appliedDate?: string;
+  expectedTimeSlot?: MeetingTimeSlot;
+  matchedTimeSlot?: MeetingTimeSlot;
   matchCount?: number;
   matches?: IntranetCheckMatch[];
   reason?: string;
@@ -131,6 +137,7 @@ type ApplicationLiveDbRow = {
   region_id: string;
   leader_name: string | null;
   company_name: string | null;
+  meeting_time_slot: MeetingTimeSlot | null;
   is_excluded: boolean | null;
   is_reserve: boolean | null;
   reviewed: boolean | null;
@@ -193,6 +200,12 @@ const fmtKstYmd = (v?: string | null) => {
   }).formatToParts(safe);
   const byType = new Map(parts.map((p) => [p.type, p.value]));
   return `${byType.get('year') ?? '0000'}-${byType.get('month') ?? '01'}-${byType.get('day') ?? '01'}`;
+};
+
+const timeSlotLabel = (slot?: MeetingTimeSlot | null) => {
+  if (slot === 'am') return '오전';
+  if (slot === 'pm') return '오후';
+  return '-';
 };
 
 export default function AdminPage() {
@@ -400,7 +413,7 @@ export default function AdminPage() {
     let appliesQuery = supabase
       .from('applications_live')
       .select(
-        'id, created_at, region_id, leader_name, company_name, is_excluded, is_reserve, reviewed, reviewed_at, reviewed_by',
+        'id, created_at, region_id, leader_name, company_name, meeting_time_slot, is_excluded, is_reserve, reviewed, reviewed_at, reviewed_by',
         { count: 'exact' },
       )
       .eq('is_reserve', false)
@@ -413,14 +426,14 @@ export default function AdminPage() {
 
     const reserveQuery = supabase
       .from('applications_live')
-      .select('id, created_at, region_id, leader_name, company_name, is_excluded, is_reserve, reviewed, reviewed_at, reviewed_by')
+      .select('id, created_at, region_id, leader_name, company_name, meeting_time_slot, is_excluded, is_reserve, reviewed, reviewed_at, reviewed_by')
       .eq('is_reserve', true)
       .order('created_at', { ascending: false })
       .limit(200);
 
     const boardQuery = supabase
       .from('applications_live')
-      .select('id, created_at, region_id, leader_name, company_name, is_excluded, is_reserve')
+      .select('id, created_at, region_id, leader_name, company_name, meeting_time_slot, is_excluded, is_reserve')
       .eq('is_reserve', false)
       .order('created_at', { ascending: false });
 
@@ -464,6 +477,7 @@ export default function AdminPage() {
       region_id: String(x.region_id),
       leader_name: String(x.leader_name ?? ''),
       company_name: String(x.company_name ?? ''),
+      meeting_time_slot: x.meeting_time_slot === 'am' || x.meeting_time_slot === 'pm' ? x.meeting_time_slot : null,
       is_excluded: Boolean(x.is_excluded),
       is_reserve: Boolean(x.is_reserve),
       reviewed: Boolean(x.reviewed),
@@ -477,6 +491,7 @@ export default function AdminPage() {
       region_id: String(x.region_id),
       leader_name: String(x.leader_name ?? ''),
       company_name: String(x.company_name ?? ''),
+      meeting_time_slot: x.meeting_time_slot === 'am' || x.meeting_time_slot === 'pm' ? x.meeting_time_slot : null,
       is_excluded: Boolean(x.is_excluded),
       is_reserve: Boolean(x.is_reserve),
       reviewed: Boolean(x.reviewed),
@@ -490,6 +505,7 @@ export default function AdminPage() {
       region_id: String(x.region_id),
       leader_name: String(x.leader_name ?? ''),
       company_name: String(x.company_name ?? ''),
+      meeting_time_slot: x.meeting_time_slot === 'am' || x.meeting_time_slot === 'pm' ? x.meeting_time_slot : null,
       is_excluded: Boolean(x.is_excluded),
       is_reserve: Boolean(x.is_reserve),
       reviewed: Boolean(x.reviewed),
@@ -866,6 +882,7 @@ const handleToggleReviewed = async (applicationId: string, checked: boolean) => 
       leaderName: a.leader_name ?? '',
       regionName: regionsMap.get(a.region_id)?.region_name ?? a.region_id,
       companyName: a.company_name ?? '',
+      meetingTimeSlot: a.meeting_time_slot,
     }));
 
     setBusyIntranetCheck(true);
@@ -897,6 +914,7 @@ const handleToggleReviewed = async (applicationId: string, checked: boolean) => 
           status: 'missing' as IntranetCheckStatus,
           expectedApDate: row.appliedDate,
           appliedDate: row.appliedDate,
+          expectedTimeSlot: row.meetingTimeSlot === 'am' || row.meetingTimeSlot === 'pm' ? row.meetingTimeSlot : undefined,
           matchCount: 0,
           matches: [],
           reason: 'not_found_in_latest_check',
@@ -1284,7 +1302,7 @@ const copyBoardAsImage = async () => {
     const padding = 18;
 
     const headerH = 46;
-    const rowH = 90;
+    const rowH = 100;
 
     // 열 너비: 첫 열(지역/건수)은 내용에 맞춰 좁게, 나머지는 고정
     const firstColW = 130; // 필요시 95~130 사이 조정
@@ -1408,7 +1426,15 @@ const copyBoardAsImage = async () => {
           ctx.textAlign = 'center';
           ctx.textBaseline = 'alphabetic';
           ctx.font = `normal 900 15px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans KR", Arial`;
-          ctx.fillText(item.leader_name ?? '', cellX + colW / 2, cellY + 34);
+          ctx.fillText(item.leader_name ?? '', cellX + colW / 2, cellY + 30);
+          ctx.restore();
+
+          ctx.save();
+          ctx.fillStyle = '#0f172a';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'alphabetic';
+          ctx.font = `normal 900 11px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans KR", Arial`;
+          ctx.fillText(timeSlotLabel(item.meeting_time_slot), cellX + colW / 2, cellY + 50);
           ctx.restore();
 
           // ✅ 기업명: 항상 작은 글자 (매번 강제 세팅) + ... 유지
@@ -1421,7 +1447,7 @@ const copyBoardAsImage = async () => {
           const maxWidth = colW - 12;
           const company = item.company_name ?? '';
           const fitted = fitText(ctx, company, maxWidth);
-          ctx.fillText(fitted, cellX + colW / 2, cellY + 60);
+          ctx.fillText(fitted, cellX + colW / 2, cellY + 74);
           ctx.restore();
         } else {
           // ✅ 빈칸 표시도 매번 강제 세팅 (다음 셀에 영향 없게)
