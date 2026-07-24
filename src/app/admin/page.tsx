@@ -1286,7 +1286,9 @@ const copyBoardAsImage = async () => {
     const regions = regionsOrdered
       .map((r) => {
         const cells = boardByRegionId.get(r.id) ?? [];
-        return { ...r, cells, total: cells.length };
+        const amCount = cells.filter((cell) => cell.meeting_time_slot === 'am').length;
+        const pmCount = cells.filter((cell) => cell.meeting_time_slot === 'pm').length;
+        return { ...r, cells, total: cells.length, amCount, pmCount };
       })
       .filter((r) => r.total > 0); // 0건 행 숨김 유지
 
@@ -1302,10 +1304,10 @@ const copyBoardAsImage = async () => {
     const padding = 18;
 
     const headerH = 46;
-    const rowH = 100;
+    const rowH = 110;
 
     // 열 너비: 첫 열(지역/건수)은 내용에 맞춰 좁게, 나머지는 고정
-    const firstColW = 130; // 필요시 95~130 사이 조정
+    const firstColW = 140; // 필요시 95~140 사이 조정
     const colW = 96;
 
     const tableW = firstColW + cols * colW;
@@ -1399,11 +1401,13 @@ const copyBoardAsImage = async () => {
       ctx.textBaseline = 'middle';
 
       // 지역명 / 건수 (아주 큼)
-      ctx.font = `normal 900 18px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans KR", Arial`;
-      ctx.fillText(`${r.name} / ${r.total}`,
-        x0 + firstColW / 2,
-        ry + rowH / 2
-      );
+      ctx.font = `normal 900 17px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans KR", Arial`;
+      ctx.fillText(`${r.name} / ${r.total}`, x0 + firstColW / 2, ry + 32);
+
+      ctx.fillStyle = '#334155';
+      ctx.font = `normal 900 12px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans KR", Arial`;
+      ctx.fillText(`오전 / ${r.amCount}`, x0 + firstColW / 2, ry + 60);
+      ctx.fillText(`오후 / ${r.pmCount}`, x0 + firstColW / 2, ry + 80);
       ctx.restore();
 
       // 각 지원 셀

@@ -32,6 +32,17 @@ function timeSlotLabel(slot?: MeetingTimeSlot | null) {
   return '-';
 }
 
+function countTimeSlots(cells: BoardCell[]) {
+  return cells.reduce(
+    (counts, cell) => {
+      if (cell.meeting_time_slot === 'am') counts.am += 1;
+      if (cell.meeting_time_slot === 'pm') counts.pm += 1;
+      return counts;
+    },
+    { am: 0, pm: 0 },
+  );
+}
+
 export default function QuotaBoard({
   boardRef,
   busyCopyBoard,
@@ -86,6 +97,7 @@ export default function QuotaBoard({
                 {regionsOrdered.map((r) => {
                   const cells = boardByRegionId.get(r.id) ?? [];
                   const total = cells.length;
+                  const timeCounts = countTimeSlots(cells);
                   if (total === 0) return null;
                   return (
                     <tr key={r.id} style={{ borderTop: '1px solid #eee' }}>
@@ -102,7 +114,11 @@ export default function QuotaBoard({
                           textAlign: 'center',
                         }}
                       >
-                        {r.name} / {total}
+                        <div style={{ display: 'grid', gap: 3, justifyItems: 'center', lineHeight: 1.25 }}>
+                          <div style={{ fontSize: 12, fontWeight: 950 }}>{r.name} / {total}</div>
+                          <div style={{ fontSize: 11, color: '#334155', fontWeight: 900 }}>오전 / {timeCounts.am}</div>
+                          <div style={{ fontSize: 11, color: '#334155', fontWeight: 900 }}>오후 / {timeCounts.pm}</div>
+                        </div>
                       </td>
 
                       {Array.from({ length: boardMaxCols }).map((_, idx) => {
