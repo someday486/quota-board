@@ -4,6 +4,18 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { useIsMobile } from '@/hooks/useIsMobile';
+import {
+  applyApplicationStatusPayload,
+  applyRegionTotalPayload,
+  mergeByIdDesc,
+  removeById,
+  toLeaderApplyRow,
+  todayCountDelta,
+  type ApplicationRealtimeRow,
+  type RealtimeConnectionState,
+  type RealtimePayload,
+  type RegionTotalRealtimeRow,
+} from '@/lib/realtimeEgress';
 
 type RegionStatusRow = {
   region_id: string;
@@ -111,6 +123,7 @@ export default function LeaderPage() {
   const isMobile = useIsMobile();
 
   const [checking, setChecking] = useState(true);
+  const [realtimeState, setRealtimeState] = useState<RealtimeConnectionState>('connecting');
   const [leaderName, setLeaderName] = useState('팀장');
   const [myUserId, setMyUserId] = useState<string>('');
 
@@ -171,13 +184,6 @@ export default function LeaderPage() {
       if (saved === "0") setGuideOpen(false);
       if (saved === "1") setGuideOpen(true);
     } catch {}
-  }, []);
-
-  useEffect(() => {
-    const timer = window.setInterval(() => {
-      window.location.reload();
-    }, 60 * 60 * 1000);
-    return () => window.clearInterval(timer);
   }, []);
 
   const toggleGuide = () => {
@@ -419,6 +425,31 @@ export default function LeaderPage() {
     setRestrictedUntil(row.participation_restricted_until ?? null);
   };
 
+  const patchMyApplicationPayload = (payload: RealtimePayload<ApplicationRealtimeRow>, uid: string) => {
+    const eventType = String(payload.eventType ?? '').toUpperCase();
+    const newRow = payload.new ?? null;
+    const oldRow = payload.old ?? null;
+    const oldBelongs = oldRow?.user_id === uid;
+    const newBelongs = newRow?.user_id === uid;
+
+    setMyTodayCount((prev) => Math.max(0, prev + todayCountDelta(payload, uid)));
+
+    if (eventType === 'DELETE') {
+      if (oldBelongs) setMyApplies((prev) => removeById(prev, String(oldRow?.id ?? '')));
+      return;
+    }
+
+    if (newBelongs) {
+      const mapped = toLeaderApplyRow<MyApplyRow>(newRow);
+      if (mapped) setMyApplies((prev) => mergeByIdDesc(prev, mapped, 100));
+      return;
+    }
+
+    if (oldBelongs) {
+      setMyApplies((prev) => removeById(prev, String(oldRow?.id ?? '')));
+    }
+  };
+
   const totalMyApplies = useMemo(() => myApplies.length, [myApplies]);
   const totalAppliedCount = useMemo(
     () => statusRows.reduce((sum, row) => sum + Number(row.applied_count ?? 0), 0),
@@ -518,6 +549,11 @@ export default function LeaderPage() {
       return;
     }
 
+    if (realtimeState !== 'connected') {
+      failWithCompany('실시간 연결을 확인하고 있습니다. 연결 복구 후 다시 지원해주세요.');
+      return;
+    }
+
     setBusyRegionId(regionId);
 
     const { data, error } = await supabase.rpc('apply_live_region', {
@@ -578,11 +614,6 @@ export default function LeaderPage() {
         note: `team_apply:${timeSlot}`,
       });
 
-      await loadStatus();
-      const { data: u } = await supabase.auth.getUser();
-      if (u?.user) {
-        await Promise.all([loadMyApplies(u.user.id), loadMyTodayCount(u.user.id)]);
-      }
       setTimeSlotByRegionId((prev) => ({ ...prev, [regionId]: '' }));
     } else if (result === 'CLOSED') {
       const closedMessage = `${c} 지원 실패: 방금 마감되었습니다. 현재 현황을 다시 불러왔습니다.`;
@@ -656,6 +687,11 @@ export default function LeaderPage() {
 
     if (!myUserId) {
       router.replace('/login');
+      return;
+    }
+
+    if (realtimeState !== 'connected') {
+      setErrorMsg('실시간 연결을 확인하고 있습니다. 연결 복구 후 다시 지원해주세요.');
       return;
     }
 
@@ -768,28 +804,24 @@ export default function LeaderPage() {
 
         // 기존 채널 정리
         if (ch) supabase.removeChannel(ch);
+        setRealtimeState((prev) => (prev === 'connected' ? 'reconnecting' : 'connecting'));
 
         ch = supabase
           // 재구독 시 채널명 충돌 방지
           .channel(`leader-live-${Date.now()}`)
 
-          .on('postgres_changes', { event: '*', schema: 'public', table: 'region_totals' }, () => {
-            loadStatus();
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'region_totals' }, (payload) => {
+            setStatusRows((prev) =>
+              applyRegionTotalPayload(prev, payload as RealtimePayload<RegionTotalRealtimeRow>),
+            );
           })
 
           // Everyone needs closed/open status to update when any live application changes.
-          .on('postgres_changes', { event: '*', schema: 'public', table: 'applications_live' }, () => {
-            loadStatus();
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'applications_live' }, (payload) => {
+            const typedPayload = payload as RealtimePayload<ApplicationRealtimeRow>;
+            setStatusRows((prev) => applyApplicationStatusPayload(prev, typedPayload));
+            if (uidRef) patchMyApplicationPayload(typedPayload, uidRef);
           })
-
-          .on(
-            'postgres_changes',
-            { event: '*', schema: 'public', table: 'applications_live', filter: `user_id=eq.${uidRef}` },
-            () => {
-              loadMyApplies(uidRef!);
-              loadMyTodayCount(uidRef!);
-            },
-          )
 
           .on('postgres_changes', { event: '*', schema: 'public', table: 'regions' }, () => {
             loadRegions();
@@ -816,10 +848,14 @@ export default function LeaderPage() {
 
           .subscribe((status) => {
             // 정상 상태
-            if (status === 'SUBSCRIBED') return;
+            if (status === 'SUBSCRIBED') {
+              setRealtimeState('connected');
+              return;
+            }
 
             // 끊김/에러면 자동 재구독
             if (status === 'CLOSED' || status === 'TIMED_OUT' || status === 'CHANNEL_ERROR') {
+              setRealtimeState(status === 'CLOSED' ? 'disconnected' : 'reconnecting');
               if (retryTimer) window.clearTimeout(retryTimer);
               retryTimer = window.setTimeout(() => {
                 // 놓친 이벤트 보정: 재구독 직후 한번 강제 동기화
@@ -860,6 +896,7 @@ export default function LeaderPage() {
       // Realtime이 잠깐 죽어도 정합성 유지용 백업 폴링(30초)
       pollTimer = window.setInterval(() => {
         if (!alive) return;
+        if (document.visibilityState !== 'visible') return;
         loadStatus();
         if (uidRef) {
           loadMyApplies(uidRef);
@@ -1136,7 +1173,7 @@ export default function LeaderPage() {
                   cursor: 'pointer',
                   width: isMobile ? '100%' : 'auto',
                 }}
-                disabled={closedRegions.length === 0 || limitBlocked || groupBlocked || restrictionBlocked}
+                disabled={closedRegions.length === 0 || limitBlocked || groupBlocked || restrictionBlocked || realtimeState !== 'connected'}
                 title={closedRegions.length === 0 ? '마감된 지역이 없어서 예비 등록이 필요 없습니다.' : '마감된 지역에 예비 등록합니다.'}
               >
                 예비등록
@@ -1163,7 +1200,7 @@ export default function LeaderPage() {
                 const bg = REGION_COLOR[r.region_name] ?? '#fff';
                 const closed = r.is_closed || r.capacity_remaining <= 0 || r.capacity_total <= 0;
                 const isBusy = busyRegionId === r.region_id;
-                const disabled = closed || isBusy || limitBlocked || groupBlocked || restrictionBlocked;
+                const disabled = closed || isBusy || limitBlocked || groupBlocked || restrictionBlocked || realtimeState !== 'connected';
                 const rowNotice = rowNoticeByRegionId[r.region_id];
                 const selectedTimeSlot = timeSlotByRegionId[r.region_id] ?? '';
                 if (r.capacity_total === 0) return null;

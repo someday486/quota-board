@@ -3,6 +3,12 @@
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
+import {
+  type ApplicationRealtimeRow,
+  type RealtimeConnectionState,
+  type RealtimePayload,
+  type RegionTotalRealtimeRow,
+} from '@/lib/realtimeEgress';
 
 type UseAdminPageParams = {
   setAdminUserId: (id: string) => void;
@@ -22,6 +28,9 @@ type UseAdminPageParams = {
   setActiveGroup: (value: number) => void;
   exemptKey: string;
   groupSettingKey: string;
+  onRegionTotalChange?: (payload: RealtimePayload<RegionTotalRealtimeRow>) => void;
+  onApplicationChange?: (payload: RealtimePayload<ApplicationRealtimeRow>) => void;
+  setRealtimeState?: (value: RealtimeConnectionState) => void;
 };
 
 type ProfileRow = {
@@ -50,6 +59,9 @@ export function useAdminPage({
   setActiveGroup,
   exemptKey,
   groupSettingKey,
+  onRegionTotalChange,
+  onApplicationChange,
+  setRealtimeState,
 }: UseAdminPageParams) {
   const router = useRouter();
 
@@ -65,6 +77,7 @@ export function useAdminPage({
     let needsStatus = false;
     let needsApplies = false;
     let needsTodayCounts = false;
+    let reconnectAttempt = 0;
 
     const flushLiveRefresh = () => {
       liveRefreshTimer = null;
@@ -78,6 +91,13 @@ export function useAdminPage({
       needsTodayCounts = false;
 
       if (!alive) return;
+      if (document.visibilityState !== 'visible') {
+        needsRegions = runRegions;
+        needsStatus = runStatus;
+        needsApplies = runApplies;
+        needsTodayCounts = runTodayCounts;
+        return;
+      }
       if (runRegions) loadRegions();
       if (runStatus) loadStatus();
       if (runApplies) loadApplies();
@@ -160,17 +180,23 @@ export function useAdminPage({
         if (!alive) return;
 
         if (ch) supabase.removeChannel(ch);
+        setRealtimeState?.(reconnectAttempt > 0 ? 'reconnecting' : 'connecting');
 
         ch = supabase
           .channel(`admin-live-${Date.now()}`)
-          .on('postgres_changes', { event: '*', schema: 'public', table: 'region_totals' }, () => {
-            scheduleLiveRefresh({ status: true });
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'region_totals' }, (payload) => {
+            if (onRegionTotalChange) {
+              onRegionTotalChange(payload as RealtimePayload<RegionTotalRealtimeRow>);
+            } else {
+              scheduleLiveRefresh({ status: true });
+            }
           })
-          .on('postgres_changes', { event: '*', schema: 'public', table: 'applications_live' }, () => {
-            scheduleLiveRefresh({ applies: true, status: true, todayCounts: true });
-          })
-          .on('postgres_changes', { event: '*', schema: 'public', table: 'call_recordings' }, () => {
-            scheduleLiveRefresh({ applies: true });
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'applications_live' }, (payload) => {
+            if (onApplicationChange) {
+              onApplicationChange(payload as RealtimePayload<ApplicationRealtimeRow>);
+            } else {
+              scheduleLiveRefresh({ applies: true, status: true, todayCounts: true });
+            }
           })
           .on('postgres_changes', { event: '*', schema: 'public', table: 'regions' }, () => {
             scheduleLiveRefresh({ regions: true, status: true });
@@ -207,15 +233,22 @@ export function useAdminPage({
             },
           )
           .subscribe((status) => {
-            if (status === 'SUBSCRIBED') return;
+            if (status === 'SUBSCRIBED') {
+              reconnectAttempt = 0;
+              setRealtimeState?.('connected');
+              return;
+            }
             if (status === 'CLOSED' || status === 'TIMED_OUT' || status === 'CHANNEL_ERROR') {
+              setRealtimeState?.(status === 'CLOSED' ? 'disconnected' : 'reconnecting');
               if (retryTimer) window.clearTimeout(retryTimer);
+              const delayMs = Math.min(30_000, 1000 * 2 ** reconnectAttempt);
+              reconnectAttempt += 1;
               retryTimer = window.setTimeout(() => {
                 loadStatus();
                 loadApplies();
                 loadTodayCounts();
                 resubscribe();
-              }, 1000);
+              }, delayMs);
             }
           });
       };
@@ -233,10 +266,11 @@ export function useAdminPage({
 
       pollTimer = window.setInterval(() => {
         if (!alive) return;
+        if (document.visibilityState !== 'visible') return;
         loadStatus();
         loadApplies();
         loadTodayCounts();
-      }, 5 * 60 * 1000);
+      }, 10 * 60 * 1000);
 
     };
 

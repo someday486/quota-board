@@ -26,6 +26,18 @@ import {
   rowBtn,
   td,
 } from './styles';
+import {
+  applyApplicationStatusPayload,
+  applyRegionTotalPayload,
+  isTodayKst,
+  mergeByIdDesc,
+  removeById,
+  toAdminApplyRow,
+  type ApplicationRealtimeRow,
+  type RealtimeConnectionState,
+  type RealtimePayload,
+  type RegionTotalRealtimeRow,
+} from '@/lib/realtimeEgress';
 
 type RegionStatusRow = {
   region_id: string;
@@ -232,6 +244,7 @@ export default function AdminPage() {
 
   const [busyCopyBoard, setBusyCopyBoard] = useState(false);
   const [checking, setChecking] = useState(true);
+  const [realtimeState, setRealtimeState] = useState<RealtimeConnectionState>('connecting');
   const [adminName, setAdminName] = useState('관리자');
   const [errorMsg, setErrorMsg] = useState('');
   type ToastType = 'success' | 'info';
@@ -516,6 +529,119 @@ export default function AdminPage() {
     setApplies(normals);
     setBoardApplies(boardRows);
     setReserveApplies(reserves);
+  };
+
+  const patchRegionTotalPayload = (payload: RealtimePayload<RegionTotalRealtimeRow>) => {
+    const row = payload.new ?? payload.old;
+    const regionId = String(row?.region_id ?? '');
+    if (!regionId) return;
+
+    setRegionsStatus((prev) => applyRegionTotalPayload(prev, payload));
+    setTotalByRegionId((prev) => ({
+      ...prev,
+      [regionId]: Math.max(0, Number(row?.capacity_total ?? prev[regionId] ?? 0)),
+    }));
+  };
+
+  const patchTodayCountsPayload = (payload: RealtimePayload<ApplicationRealtimeRow>) => {
+    const eventType = String(payload.eventType ?? '').toUpperCase();
+    const oldRow = payload.old ?? null;
+    const newRow = payload.new ?? null;
+
+    setTodayCountsByUserId((prev) => {
+      const next = { ...prev };
+      const add = (userId: unknown, delta: number) => {
+        const id = String(userId ?? '').trim();
+        if (!id) return;
+        next[id] = Math.max(0, (next[id] ?? 0) + delta);
+      };
+
+      if (eventType !== 'INSERT' && oldRow?.user_id && isTodayKst(oldRow.created_at)) {
+        add(oldRow.user_id, -1);
+      }
+      if (eventType !== 'DELETE' && newRow?.user_id && isTodayKst(newRow.created_at)) {
+        add(newRow.user_id, 1);
+      }
+
+      return next;
+    });
+  };
+
+  const patchApplicationPayload = (payload: RealtimePayload<ApplicationRealtimeRow>) => {
+    const eventType = String(payload.eventType ?? '').toUpperCase();
+    const oldRow = toAdminApplyRow<LiveApplyRow>(payload.old ?? null);
+    const newRow = toAdminApplyRow<LiveApplyRow>(payload.new ?? null);
+    const oldId = oldRow?.id ?? String(payload.old?.id ?? '');
+
+    const matchesCurrentNormalFilter = (row: LiveApplyRow | null) => {
+      if (!row || row.is_reserve) return false;
+      const regionFilter = applyRegionFilterRef.current;
+      return !regionFilter || row.region_id === regionFilter;
+    };
+
+    const oldNormal = matchesCurrentNormalFilter(oldRow);
+    const newNormal = matchesCurrentNormalFilter(newRow);
+
+    setRegionsStatus((prev) => applyApplicationStatusPayload(prev, payload));
+    patchTodayCountsPayload(payload);
+
+    const normalCountDelta =
+      eventType === 'INSERT'
+        ? newNormal
+          ? 1
+          : 0
+        : eventType === 'DELETE'
+          ? oldNormal
+            ? -1
+            : 0
+          : oldRow
+            ? (newNormal ? 1 : 0) - (oldNormal ? 1 : 0)
+            : 0;
+
+    setTotalApplyCount((prev) => {
+      const next = prev + normalCountDelta;
+      return Math.max(0, next);
+    });
+
+    setBoardApplies((prev) => {
+      if (eventType === 'DELETE') return removeById(prev, oldId);
+      if (newRow && !newRow.is_reserve) return mergeByIdDesc(prev, newRow);
+      if (oldRow && !oldRow.is_reserve) return removeById(prev, oldRow.id);
+      return prev;
+    });
+
+    setReserveApplies((prev) => {
+      if (eventType === 'DELETE') return removeById(prev, oldId);
+      if (newRow?.is_reserve) return mergeByIdDesc(prev, newRow, 200);
+      if (oldRow?.is_reserve) return removeById(prev, oldRow.id);
+      return prev;
+    });
+
+    setApplies((prev) => {
+      const hasExisting = Boolean(newRow && prev.some((item) => item.id === newRow.id));
+
+      if (eventType === 'DELETE') {
+        return oldNormal ? removeById(prev, oldId) : prev;
+      }
+
+      if (newNormal && (applyPageRef.current === 1 || hasExisting)) {
+        return newRow ? mergeByIdDesc(prev, newRow, APPLY_PAGE_SIZE) : prev;
+      }
+
+      if (oldNormal && oldRow) {
+        return removeById(prev, oldRow.id);
+      }
+
+      return prev;
+    });
+
+    if (eventType === 'DELETE' && oldId) {
+      setIntranetStatusByAppId((prev) => {
+        const next = { ...prev };
+        delete next[oldId];
+        return next;
+      });
+    }
   };
 
 const handleToggleReviewed = async (applicationId: string, checked: boolean) => {
@@ -1687,6 +1813,9 @@ const copyBoardAsImage = async () => {
     setActiveGroup,
     exemptKey: EXEMPT_KEY,
     groupSettingKey: GROUP_SETTING_KEY,
+    onRegionTotalChange: patchRegionTotalPayload,
+    onApplicationChange: patchApplicationPayload,
+    setRealtimeState,
   });
 
 
@@ -1723,6 +1852,23 @@ const copyBoardAsImage = async () => {
 
         {/* Error alert (only errors) */}
         <ErrorAlert message={errorMsg} onClose={() => setErrorMsg('')} />
+
+        {realtimeState !== 'connected' && (
+          <div
+            style={{
+              marginTop: 12,
+              padding: '10px 12px',
+              borderRadius: 10,
+              border: '1px solid #fed7aa',
+              background: '#fff7ed',
+              color: '#9a3412',
+              fontSize: 13,
+              fontWeight: 900,
+            }}
+          >
+            실시간 연결을 확인하고 있습니다. 연결 복구 후 최신 현황을 다시 동기화합니다.
+          </div>
+        )}
 
         {/* 지역별 TO + 팀장 현황 (헤더 내부에 액션 배치) */}
       <div
