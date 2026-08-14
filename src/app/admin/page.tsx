@@ -1856,7 +1856,11 @@ const copyBoardAsImage = async () => {
         {realtimeState !== 'connected' && (
           <div
             style={{
-              marginTop: 12,
+              position: 'fixed',
+              right: 16,
+              bottom: 16,
+              zIndex: 60,
+              maxWidth: 'min(420px, calc(100vw - 32px))',
               padding: '10px 12px',
               borderRadius: 10,
               border: '1px solid #fed7aa',
@@ -1864,6 +1868,8 @@ const copyBoardAsImage = async () => {
               color: '#9a3412',
               fontSize: 13,
               fontWeight: 900,
+              boxShadow: '0 12px 30px rgba(15, 23, 42, 0.14)',
+              pointerEvents: 'none',
             }}
           >
             실시간 연결을 확인하고 있습니다. 연결 복구 후 최신 현황을 다시 동기화합니다.
