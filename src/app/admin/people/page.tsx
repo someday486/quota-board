@@ -176,6 +176,20 @@ export default function AdminPeoplePage() {
       });
   }, [rows, query, restrictedOnly, penaltyFilter, groupFilter, employmentFilter]);
 
+  const activeGroupSummary = useMemo(() => {
+    const activeRows = rows.filter((r) => !(r.role === 'admin' || r.is_admin) && !isResigned(r));
+    return activeRows.reduce(
+      (summary, row) => {
+        summary.total += 1;
+        if (row.leader_group === 1) summary.group1 += 1;
+        else if (row.leader_group === 2) summary.group2 += 1;
+        else summary.unassigned += 1;
+        return summary;
+      },
+      { total: 0, group1: 0, group2: 0, unassigned: 0 },
+    );
+  }, [rows]);
+
   const doLogout = async () => {
     await supabase.auth.signOut();
     router.replace('/login');
@@ -641,6 +655,25 @@ export default function AdminPeoplePage() {
             </div>
           </div>
 
+          <div style={summaryGrid} aria-label="재직 팀장 조별 인원">
+            <div style={summaryChip}>
+              <span style={summaryLabel}>재직 전체</span>
+              <b style={summaryValue}>{activeGroupSummary.total}명</b>
+            </div>
+            <div style={summaryChip}>
+              <span style={summaryLabel}>1조</span>
+              <b style={summaryValue}>{activeGroupSummary.group1}명</b>
+            </div>
+            <div style={summaryChip}>
+              <span style={summaryLabel}>2조</span>
+              <b style={summaryValue}>{activeGroupSummary.group2}명</b>
+            </div>
+            <div style={summaryChip}>
+              <span style={summaryLabel}>미지정</span>
+              <b style={summaryValue}>{activeGroupSummary.unassigned}명</b>
+            </div>
+          </div>
+
           {errorMsg && <div style={errorBox}>{errorMsg}</div>}
           {successMsg && <div style={successBox}>{successMsg}</div>}
 
@@ -964,6 +997,37 @@ const checkWrap: CSSProperties = {
   fontWeight: 700,
   color: '#374151',
   background: '#fff',
+};
+
+const summaryGrid: CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
+  gap: 8,
+  marginTop: 12,
+};
+
+const summaryChip: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  gap: 10,
+  minHeight: 44,
+  border: '1px solid #dbeafe',
+  borderRadius: 10,
+  background: '#eff6ff',
+  padding: '8px 12px',
+};
+
+const summaryLabel: CSSProperties = {
+  color: '#1e3a8a',
+  fontSize: 13,
+  fontWeight: 900,
+};
+
+const summaryValue: CSSProperties = {
+  color: '#0f172a',
+  fontSize: 18,
+  fontWeight: 950,
 };
 
 const thCell: CSSProperties = {
