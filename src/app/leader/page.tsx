@@ -1173,7 +1173,7 @@ export default function LeaderPage() {
                   cursor: 'pointer',
                   width: isMobile ? '100%' : 'auto',
                 }}
-                disabled={closedRegions.length === 0 || limitBlocked || groupBlocked || restrictionBlocked || realtimeState !== 'connected'}
+                disabled={closedRegions.length === 0 || limitBlocked || groupBlocked || restrictionBlocked}
                 title={closedRegions.length === 0 ? '마감된 지역이 없어서 예비 등록이 필요 없습니다.' : '마감된 지역에 예비 등록합니다.'}
               >
                 예비등록
@@ -1200,7 +1200,7 @@ export default function LeaderPage() {
                 const bg = REGION_COLOR[r.region_name] ?? '#fff';
                 const closed = r.is_closed || r.capacity_remaining <= 0 || r.capacity_total <= 0;
                 const isBusy = busyRegionId === r.region_id;
-                const disabled = closed || isBusy || limitBlocked || groupBlocked || restrictionBlocked || realtimeState !== 'connected';
+                const disabled = closed || isBusy || limitBlocked || groupBlocked || restrictionBlocked;
                 const rowNotice = rowNoticeByRegionId[r.region_id];
                 const selectedTimeSlot = timeSlotByRegionId[r.region_id] ?? '';
                 if (r.capacity_total === 0) return null;
