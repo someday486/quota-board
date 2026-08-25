@@ -34,7 +34,6 @@ import {
   removeById,
   toAdminApplyRow,
   type ApplicationRealtimeRow,
-  type RealtimeConnectionState,
   type RealtimePayload,
   type RegionTotalRealtimeRow,
 } from '@/lib/realtimeEgress';
@@ -244,7 +243,6 @@ export default function AdminPage() {
 
   const [busyCopyBoard, setBusyCopyBoard] = useState(false);
   const [checking, setChecking] = useState(true);
-  const [realtimeState, setRealtimeState] = useState<RealtimeConnectionState>('connecting');
   const [adminName, setAdminName] = useState('관리자');
   const [errorMsg, setErrorMsg] = useState('');
   type ToastType = 'success' | 'info';
@@ -1815,7 +1813,6 @@ const copyBoardAsImage = async () => {
     groupSettingKey: GROUP_SETTING_KEY,
     onRegionTotalChange: patchRegionTotalPayload,
     onApplicationChange: patchApplicationPayload,
-    setRealtimeState,
   });
 
 
@@ -1852,29 +1849,6 @@ const copyBoardAsImage = async () => {
 
         {/* Error alert (only errors) */}
         <ErrorAlert message={errorMsg} onClose={() => setErrorMsg('')} />
-
-        {realtimeState !== 'connected' && (
-          <div
-            style={{
-              position: 'fixed',
-              right: 16,
-              bottom: 16,
-              zIndex: 60,
-              maxWidth: 'min(420px, calc(100vw - 32px))',
-              padding: '10px 12px',
-              borderRadius: 10,
-              border: '1px solid #fed7aa',
-              background: '#fff7ed',
-              color: '#9a3412',
-              fontSize: 13,
-              fontWeight: 900,
-              boxShadow: '0 12px 30px rgba(15, 23, 42, 0.14)',
-              pointerEvents: 'none',
-            }}
-          >
-            실시간 연결을 확인하고 있습니다. 연결 복구 후 최신 현황을 다시 동기화합니다.
-          </div>
-        )}
 
         {/* 지역별 TO + 팀장 현황 (헤더 내부에 액션 배치) */}
       <div
