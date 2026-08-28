@@ -1,7 +1,8 @@
 'use client';
 
+import type { Dispatch, SetStateAction } from 'react';
 import { useIsMobile } from '@/hooks/useIsMobile';
-import { dangerMiniBtn, rowBtn, tdSmall, thSmall } from '../styles';
+import { dangerMiniBtn, input, rowBtn, tdSmall, thSmall } from '../styles';
 
 type RegionRow = {
   id: string;
@@ -69,6 +70,16 @@ type ReserveListProps = {
   toggleExcludeApply: (row: LiveApplyRow) => void;
   deleteApply: (row: LiveApplyRow) => void;
   busyDelete: string | null;
+  editingCompanyId: string | null;
+  setEditingCompanyId: (value: string | null) => void;
+  companyInputById: Record<string, string>;
+  setCompanyInputById: Dispatch<SetStateAction<Record<string, string>>>;
+  timeSlotInputById: Record<string, MeetingTimeSlot | ''>;
+  setTimeSlotInputById: Dispatch<SetStateAction<Record<string, MeetingTimeSlot | ''>>>;
+  isComposingCompanyById: Record<string, boolean>;
+  setIsComposingCompanyById: Dispatch<SetStateAction<Record<string, boolean>>>;
+  busyUpdateCompanyId: string | null;
+  updateCompanyName: (id: string) => void;
   intranetStatusByAppId: Record<string, IntranetCheckResult>;
   onCheckReserveIntranetRegistration: () => void;
   busyIntranetCheck: boolean;
@@ -190,6 +201,16 @@ export default function ReserveList({
   toggleExcludeApply,
   deleteApply,
   busyDelete,
+  editingCompanyId,
+  setEditingCompanyId,
+  companyInputById,
+  setCompanyInputById,
+  timeSlotInputById,
+  setTimeSlotInputById,
+  isComposingCompanyById,
+  setIsComposingCompanyById,
+  busyUpdateCompanyId,
+  updateCompanyName,
   intranetStatusByAppId,
   onCheckReserveIntranetRegistration,
   busyIntranetCheck,
@@ -238,7 +259,7 @@ export default function ReserveList({
           background: '#fff',
         }}
       >
-        <table style={{ width: '100%', minWidth: 1030, borderCollapse: 'collapse', fontSize: isMobile ? 13 : 14 }}>
+        <table style={{ width: '100%', minWidth: 1100, borderCollapse: 'collapse', fontSize: isMobile ? 13 : 14 }}>
           <thead>
             <tr style={{ background: '#f6f7f9' }}>
               <th style={{ ...thSmall, width: 140 }}>시간</th>
@@ -262,33 +283,136 @@ export default function ReserveList({
                 <tr key={a.id} style={{ borderTop: '1px solid #eee', background: isRegisteredIntranet ? '#fff1f2' : a.is_excluded ? '#f8fafc' : '#ffffff' }}>
                   <td style={{ ...tdSmall, width: 140, whiteSpace: 'nowrap' }}>{formatDateTime(a.created_at)}</td>
                   <td style={{ ...tdSmall, width: 70, whiteSpace: 'nowrap' }}>{rn}</td>
-                  <td style={{ ...tdSmall, width: 70, textAlign: 'center', whiteSpace: 'nowrap', fontWeight: 900 }}>{timeSlotLabel(a.meeting_time_slot)}</td>
+                  <td style={{ ...tdSmall, width: 70, textAlign: 'center', whiteSpace: 'nowrap', fontWeight: 900 }}>
+                    {editingCompanyId === a.id ? (
+                      <div style={{ display: 'inline-grid', gridTemplateColumns: '1fr', gap: 4, width: 52 }}>
+                        {(['am', 'pm'] as const).map((slot) => {
+                          const selected = (timeSlotInputById[a.id] || a.meeting_time_slot) === slot;
+                          return (
+                            <button
+                              key={slot}
+                              type="button"
+                              onClick={() => setTimeSlotInputById((p) => ({ ...p, [a.id]: slot }))}
+                              style={{
+                                height: 26,
+                                padding: '0 6px',
+                                borderRadius: 8,
+                                border: selected ? '1px solid #111827' : '1px solid #cbd5e1',
+                                background: selected ? '#111827' : '#ffffff',
+                                color: selected ? '#ffffff' : '#334155',
+                                fontSize: 12,
+                                fontWeight: 900,
+                                cursor: 'pointer',
+                              }}
+                            >
+                              {timeSlotLabel(slot)}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      timeSlotLabel(a.meeting_time_slot)
+                    )}
+                  </td>
                   <td style={{ ...tdSmall, width: 90, whiteSpace: 'nowrap', fontWeight: 900 }}>{a.leader_name}</td>
-                  <td style={tdSmall}>
-                    <span
-                      style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: 8,
-                        flexWrap: 'wrap',
-                      }}
-                    >
+                  <td
+                    style={{
+                      ...tdSmall,
+                      minWidth: 280,
+                      ...(editingCompanyId === a.id
+                        ? { whiteSpace: 'normal', overflow: 'hidden', textOverflow: 'clip' }
+                        : { whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }),
+                    }}
+                    title={a.company_name}
+                  >
+                    {editingCompanyId === a.id ? (
+                      <div style={{ display: 'flex', gap: 6, alignItems: 'center', width: '100%' }}>
+                        <input
+                          value={companyInputById[a.id] ?? a.company_name ?? ''}
+                          onChange={(e) => setCompanyInputById((p) => ({ ...p, [a.id]: e.target.value }))}
+                          onCompositionStart={() => setIsComposingCompanyById((p) => ({ ...p, [a.id]: true }))}
+                          onCompositionEnd={(e) => {
+                            setIsComposingCompanyById((p) => ({ ...p, [a.id]: false }));
+                            setCompanyInputById((p) => ({ ...p, [a.id]: (e.target as HTMLInputElement).value }));
+                          }}
+                          style={{
+                            ...input,
+                            height: 32,
+                            width: 'auto',
+                            flex: 1,
+                            minWidth: 0,
+                            maxWidth: 'none',
+                            textAlign: 'left',
+                          }}
+                          placeholder="기업명 수정"
+                          lang="ko"
+                          inputMode="text"
+                          autoCapitalize="none"
+                          autoCorrect="off"
+                          spellCheck={false}
+                        />
+                        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                          <button
+                            onClick={() => updateCompanyName(a.id)}
+                            style={rowBtn}
+                            disabled={busyUpdateCompanyId === a.id || !!isComposingCompanyById[a.id]}
+                          >
+                            {busyUpdateCompanyId === a.id ? '저장중...' : '저장'}
+                          </button>
+                          <button onClick={() => setEditingCompanyId(null)} style={rowBtn}>
+                            취소
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
                       <span
                         style={{
-                          display: 'inline-block',
-                          padding: '2px 8px',
-                          borderRadius: 999,
-                          fontSize: 12,
-                          fontWeight: 900,
-                          background: '#fff7ed',
-                          border: '1px solid #fdba74',
-                          color: '#9a3412',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 8,
+                          width: '100%',
+                          minWidth: 0,
                         }}
                       >
-                        예비
+                        <span
+                          style={{
+                            display: 'inline-block',
+                            padding: '2px 8px',
+                            borderRadius: 999,
+                            fontSize: 12,
+                            fontWeight: 900,
+                            background: '#fff7ed',
+                            border: '1px solid #fdba74',
+                            color: '#9a3412',
+                            flex: '0 0 auto',
+                          }}
+                        >
+                          예비
+                        </span>
+                        <span
+                          style={{
+                            flex: 1,
+                            minWidth: 0,
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                            fontWeight: 900,
+                          }}
+                        >
+                          {a.company_name}
+                        </span>
+                        <button
+                          onClick={() => {
+                            setEditingCompanyId(a.id);
+                            setCompanyInputById((p) => ({ ...p, [a.id]: a.company_name ?? '' }));
+                            setTimeSlotInputById((p) => ({ ...p, [a.id]: a.meeting_time_slot ?? '' }));
+                          }}
+                          style={{ ...rowBtn, flex: '0 0 auto' }}
+                        >
+                          수정
+                        </button>
                       </span>
-                      <span style={{ fontWeight: 900 }}>{a.company_name}</span>
-                    </span>
+                    )}
                   </td>
 
                   <td style={{ ...tdSmall, width: 118, textAlign: 'center' }}>

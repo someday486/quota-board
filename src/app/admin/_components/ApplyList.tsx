@@ -85,6 +85,8 @@ type ApplyListProps = {
   setEditingCompanyId: (value: string | null) => void;
   companyInputById: Record<string, string>;
   setCompanyInputById: Dispatch<SetStateAction<Record<string, string>>>;
+  timeSlotInputById: Record<string, MeetingTimeSlot | ''>;
+  setTimeSlotInputById: Dispatch<SetStateAction<Record<string, MeetingTimeSlot | ''>>>;
   isComposingCompanyById: Record<string, boolean>;
   setIsComposingCompanyById: Dispatch<SetStateAction<Record<string, boolean>>>;
   busyUpdateCompanyId: string | null;
@@ -223,6 +225,8 @@ export default function ApplyList({
   setEditingCompanyId,
   companyInputById,
   setCompanyInputById,
+  timeSlotInputById,
+  setTimeSlotInputById,
   isComposingCompanyById,
   setIsComposingCompanyById,
   busyUpdateCompanyId,
@@ -488,7 +492,37 @@ export default function ApplyList({
                   <tr key={a.id} style={{ borderTop: '1px solid #eee', background: a.is_excluded ? '#f8fafc' : '#ffffff' }}>
                     <td style={{ ...tdSmall, width: 140, textAlign: 'center' }}>{formatDateTime(a.created_at)}</td>
                     <td style={{ ...tdSmall, width: 70, textAlign: 'center' }}>{rn}</td>
-                    <td style={{ ...tdSmall, width: 70, textAlign: 'center', fontWeight: 900 }}>{timeSlotLabel(a.meeting_time_slot)}</td>
+                    <td style={{ ...tdSmall, width: 70, textAlign: 'center', fontWeight: 900 }}>
+                      {editingCompanyId === a.id ? (
+                        <div style={{ display: 'inline-grid', gridTemplateColumns: '1fr', gap: 4, width: 52 }}>
+                          {(['am', 'pm'] as const).map((slot) => {
+                            const selected = (timeSlotInputById[a.id] || a.meeting_time_slot) === slot;
+                            return (
+                              <button
+                                key={slot}
+                                type="button"
+                                onClick={() => setTimeSlotInputById((p) => ({ ...p, [a.id]: slot }))}
+                                style={{
+                                  height: 26,
+                                  padding: '0 6px',
+                                  borderRadius: 8,
+                                  border: selected ? '1px solid #111827' : '1px solid #cbd5e1',
+                                  background: selected ? '#111827' : '#ffffff',
+                                  color: selected ? '#ffffff' : '#334155',
+                                  fontSize: 12,
+                                  fontWeight: 900,
+                                  cursor: 'pointer',
+                                }}
+                              >
+                                {timeSlotLabel(slot)}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        timeSlotLabel(a.meeting_time_slot)
+                      )}
+                    </td>
                     <td style={{ ...tdSmall, width: 90, textAlign: 'center' }}>
                       <b>{a.leader_name}</b>
                     </td>
@@ -560,6 +594,7 @@ export default function ApplyList({
                             onClick={() => {
                               setEditingCompanyId(a.id);
                               setCompanyInputById((p) => ({ ...p, [a.id]: a.company_name ?? '' }));
+                              setTimeSlotInputById((p) => ({ ...p, [a.id]: a.meeting_time_slot ?? '' }));
                             }}
                             style={{ ...rowBtn, flex: '0 0 auto' }}
                           >

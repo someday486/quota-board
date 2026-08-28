@@ -329,6 +329,7 @@ export default function AdminPage() {
   // 기업명 인라인 수정
   const [editingCompanyId, setEditingCompanyId] = useState<string | null>(null);
   const [companyInputById, setCompanyInputById] = useState<Record<string, string>>({});
+  const [timeSlotInputById, setTimeSlotInputById] = useState<Record<string, MeetingTimeSlot | ''>>({});
   const [busyUpdateCompanyId, setBusyUpdateCompanyId] = useState<string | null>(null);
   const [isComposingCompanyById, setIsComposingCompanyById] = useState<Record<string, boolean>>({});
 
@@ -937,28 +938,36 @@ const handleToggleReviewed = async (applicationId: string, checked: boolean) => 
       return;
     }
 
-    const nextName = (companyInputById[id] ?? '').trim();
-    if (!nextName) {
-      pushToast('info', '기업명을 입력해주세요.');
-      return;
-    }
     const targetRow =
       applies.find((row) => row.id === id) ??
       reserveApplies.find((row) => row.id === id) ??
       boardApplies.find((row) => row.id === id) ??
       null;
+    const nextName = (companyInputById[id] ?? targetRow?.company_name ?? '').trim();
+    const nextTimeSlot = timeSlotInputById[id] || targetRow?.meeting_time_slot || '';
+    if (!nextName) {
+      pushToast('info', '기업명을 입력해주세요.');
+      return;
+    }
+    if (nextTimeSlot !== 'am' && nextTimeSlot !== 'pm') {
+      pushToast('info', '시간대를 오전/오후 중에서 선택해주세요.');
+      return;
+    }
 
     setBusyUpdateCompanyId(id);
 
-    const { error } = await supabase.from('applications_live').update({ company_name: nextName }).eq('id', id);
+    const { error } = await supabase
+      .from('applications_live')
+      .update({ company_name: nextName, meeting_time_slot: nextTimeSlot })
+      .eq('id', id);
 
     if (error) {
-      setErrorMsg(`기업명 수정 실패: ${error.message}`);
+      setErrorMsg(`지원 정보 수정 실패: ${error.message}`);
       setBusyUpdateCompanyId(null);
       return;
     }
 
-    pushToast('success', '기업명 수정 완료');
+    pushToast('success', '지원 정보 수정 완료');
     setEditingCompanyId(null);
     setBusyUpdateCompanyId(null);
 
@@ -973,7 +982,7 @@ const handleToggleReviewed = async (applicationId: string, checked: boolean) => 
         company_name: nextName,
         is_reserve: targetRow.is_reserve,
         is_excluded: targetRow.is_excluded,
-        note: 'admin_company_name_update',
+        note: `admin_application_update:${nextTimeSlot}`,
       });
     }
 
@@ -2292,6 +2301,8 @@ const copyBoardAsImage = async () => {
         setEditingCompanyId={setEditingCompanyId}
         companyInputById={companyInputById}
         setCompanyInputById={setCompanyInputById}
+        timeSlotInputById={timeSlotInputById}
+        setTimeSlotInputById={setTimeSlotInputById}
         isComposingCompanyById={isComposingCompanyById}
         setIsComposingCompanyById={setIsComposingCompanyById}
         busyUpdateCompanyId={busyUpdateCompanyId}
@@ -2320,6 +2331,16 @@ const copyBoardAsImage = async () => {
         toggleExcludeApply={toggleExcludeApply}
         deleteApply={deleteApply}
         busyDelete={busyDelete}
+        editingCompanyId={editingCompanyId}
+        setEditingCompanyId={setEditingCompanyId}
+        companyInputById={companyInputById}
+        setCompanyInputById={setCompanyInputById}
+        timeSlotInputById={timeSlotInputById}
+        setTimeSlotInputById={setTimeSlotInputById}
+        isComposingCompanyById={isComposingCompanyById}
+        setIsComposingCompanyById={setIsComposingCompanyById}
+        busyUpdateCompanyId={busyUpdateCompanyId}
+        updateCompanyName={updateCompanyName}
         intranetStatusByAppId={intranetStatusByAppId}
         onCheckReserveIntranetRegistration={checkReserveIntranetRegistration}
         busyIntranetCheck={busyIntranetCheck}
