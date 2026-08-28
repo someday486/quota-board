@@ -216,7 +216,10 @@ function stripCorporateMarkers(value: string) {
 function normalizeCompany(value: unknown) {
   let text = decodeText(String(value ?? '')).normalize('NFKC').trim().toLowerCase();
   text = stripCorporateMarkers(text);
-  text = text.replace(/\(유\)|（유）|유한회사|주식회사|농업회사법인|어업회사법인|사회적협동조합|협동조합/gu, '');
+  text = text.replace(
+    /\(\s*유(?:한)?\s*\)|（\s*유(?:한)?\s*）|\[\s*유(?:한)?\s*\]|【\s*유(?:한)?\s*】|㈲|유한회사|주식회사|농업회사법인|어업회사법인|사회적협동조합|협동조합/gu,
+    '',
+  );
   text = stripCorporateMarkers(text);
   text = text.replace(/[\s\p{P}\p{S}]+/gu, '');
   return text;
