@@ -35,6 +35,7 @@ type MyApplyRow = {
   company_name: string;
   meeting_time_slot: MeetingTimeSlot | null;
   is_reserve: boolean;
+  is_excluded: boolean;
 };
 
 type MeetingTimeSlot = 'am' | 'pm';
@@ -310,7 +311,7 @@ export default function LeaderPage() {
   const loadMyApplies = async (uid: string) => {
     const { data, error } = await supabase
       .from('applications_live')
-      .select('id, created_at, region_id, leader_name, company_name, meeting_time_slot, is_reserve')
+      .select('id, created_at, region_id, leader_name, company_name, meeting_time_slot, is_reserve, is_excluded')
       .eq('user_id', uid)
       .order('created_at', { ascending: false })
       .limit(100);
@@ -440,8 +441,16 @@ export default function LeaderPage() {
     }
 
     if (newBelongs) {
+      const justExcluded =
+        eventType === 'UPDATE' &&
+        !Boolean(oldRow?.is_excluded) &&
+        Boolean(newRow?.is_excluded);
       const mapped = toLeaderApplyRow<MyApplyRow>(newRow);
       if (mapped) setMyApplies((prev) => mergeByIdDesc(prev, mapped, 100));
+      if (justExcluded) {
+        const companyName = String(newRow?.company_name ?? '').trim();
+        showToast('info', `${companyName || '내 지원 건'}이 관리자 검수에서 제외 처리되었습니다.`);
+      }
       return;
     }
 
@@ -450,6 +459,9 @@ export default function LeaderPage() {
     }
   };
 
+  const normalMyApplies = useMemo(() => myApplies.filter((a) => !a.is_reserve && !a.is_excluded), [myApplies]);
+  const excludedMyApplies = useMemo(() => myApplies.filter((a) => !a.is_reserve && a.is_excluded), [myApplies]);
+  const reserveMyApplies = useMemo(() => myApplies.filter((a) => a.is_reserve), [myApplies]);
   const totalMyApplies = useMemo(() => myApplies.length, [myApplies]);
   const totalAppliedCount = useMemo(
     () => statusRows.reduce((sum, row) => sum + Number(row.applied_count ?? 0), 0),
@@ -510,6 +522,128 @@ export default function LeaderPage() {
   const wrapBorder = isAlert ? '#fecaca' : '#e5e7eb';
   const innerBg = isAlert ? '#ffffff' : '#f8fafc';
   const innerBorder = isAlert ? '#fecaca' : '#eef2f7';
+
+  const renderMyApplySection = (
+    title: string,
+    rows: MyApplyRow[],
+    tone: 'normal' | 'excluded' | 'reserve',
+    emptyText: string,
+  ) => {
+    const theme =
+      tone === 'excluded'
+        ? { border: '#fecaca', background: '#fff1f2', color: '#b91c1c', badgeBg: '#fef2f2' }
+        : tone === 'reserve'
+          ? { border: '#fdba74', background: '#fff7ed', color: '#9a3412', badgeBg: '#fffbeb' }
+          : { border: '#bbf7d0', background: '#f0fdf4', color: '#166534', badgeBg: '#ecfdf5' };
+
+    return (
+      <section style={{ border: `1px solid ${theme.border}`, borderRadius: 12, overflow: 'hidden', background: '#ffffff' }}>
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            gap: 10,
+            padding: isMobile ? '12px' : '14px 16px',
+            background: theme.background,
+            borderBottom: `1px solid ${theme.border}`,
+          }}
+        >
+          <div style={{ fontSize: isMobile ? 20 : 22, fontWeight: 950, color: theme.color }}>{title}</div>
+          <div
+            style={{
+              minWidth: 58,
+              height: 30,
+              padding: '0 12px',
+              borderRadius: 999,
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              border: `1px solid ${theme.border}`,
+              background: theme.badgeBg,
+              color: theme.color,
+              fontSize: 14,
+              fontWeight: 950,
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {rows.length}건
+          </div>
+        </div>
+
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', minWidth: 600, borderCollapse: 'collapse', fontSize: 13 }}>
+            <thead>
+              <tr style={{ background: '#f8fafc' }}>
+                <th style={thSmall}>시간</th>
+                <th style={thSmall}>지역</th>
+                <th style={thSmall}>시간대</th>
+                <th style={thSmall}>기업명</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((a) => {
+                const rn = regionsMap.get(a.region_id)?.region_name ?? a.region_id;
+                return (
+                  <tr key={a.id} style={{ borderTop: '1px solid #eef2f7', background: a.is_excluded ? '#fff1f2' : '#ffffff' }}>
+                    <td style={tdSmall}>{new Date(a.created_at).toLocaleString()}</td>
+                    <td style={tdSmall}>{rn}</td>
+                    <td style={tdSmall}>{timeSlotLabel(a.meeting_time_slot)}</td>
+                    <td style={tdSmall}>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                        {a.is_reserve ? (
+                          <span
+                            style={{
+                              display: 'inline-block',
+                              padding: '2px 8px',
+                              borderRadius: 999,
+                              fontSize: 12,
+                              fontWeight: 900,
+                              background: '#fff7ed',
+                              border: '1px solid #fdba74',
+                              color: '#9a3412',
+                            }}
+                          >
+                            예비
+                          </span>
+                        ) : null}
+                        {a.is_excluded ? (
+                          <span
+                            title="관리자 검수에서 제외 처리된 건입니다."
+                            style={{
+                              display: 'inline-block',
+                              padding: '2px 8px',
+                              borderRadius: 999,
+                              fontSize: 12,
+                              fontWeight: 900,
+                              background: '#fef2f2',
+                              border: '1px solid #fecaca',
+                              color: '#b91c1c',
+                            }}
+                          >
+                            제외됨
+                          </span>
+                        ) : null}
+                        <span style={{ fontWeight: 900, color: a.is_excluded ? '#991b1b' : '#0f172a' }}>{a.company_name}</span>
+                      </span>
+                    </td>
+                  </tr>
+                );
+              })}
+
+              {rows.length === 0 && (
+                <tr>
+                  <td colSpan={4} style={{ padding: 12, color: '#64748b', fontWeight: 800 }}>
+                    {emptyText}
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    );
+  };
 
   const apply = async (regionId: string) => {
     clearError();
@@ -1347,65 +1481,20 @@ export default function LeaderPage() {
         <div style={{ ...card, marginTop: 16, padding: 0, overflow: 'hidden' }}>
           <div style={{ ...cardHeader, ...(isMobile ? { padding: '12px' } : {}) }}>
             <div>
-              <div style={cardTitle}>내 지원 목록</div>
+              <div style={cardTitle}>내 지원 현황</div>
               <div style={cardSubTitle}>
                 현재 <b style={{ color: '#0f172a' }}>{totalMyApplies}</b>건
+                <span style={{ marginLeft: 8, color: '#166534', fontWeight: 900 }}>정상 {normalMyApplies.length}건</span>
+                <span style={{ marginLeft: 8, color: '#b91c1c', fontWeight: 900 }}>제외 {excludedMyApplies.length}건</span>
+                <span style={{ marginLeft: 8, color: '#9a3412', fontWeight: 900 }}>예비 {reserveMyApplies.length}건</span>
               </div>
             </div>
           </div>
 
-          <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', minWidth: 600, borderCollapse: 'collapse', fontSize: 13 }}>
-            <thead>
-              <tr style={{ background: '#f8fafc' }}>
-                <th style={thSmall}>시간</th>
-                <th style={thSmall}>지역</th>
-                <th style={thSmall}>시간대</th>
-                <th style={thSmall}>기업명</th>
-              </tr>
-            </thead>
-            <tbody>
-              {myApplies.map((a) => {
-                const rn = regionsMap.get(a.region_id)?.region_name ?? a.region_id;
-                return (
-                  <tr key={a.id} style={{ borderTop: '1px solid #eef2f7' }}>
-                    <td style={tdSmall}>{new Date(a.created_at).toLocaleString()}</td>
-                    <td style={tdSmall}>{rn}</td>
-                    <td style={tdSmall}>{timeSlotLabel(a.meeting_time_slot)}</td>
-                    <td style={tdSmall}>
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                        {a.is_reserve ? (
-                          <span
-                            style={{
-                              display: 'inline-block',
-                              padding: '2px 8px',
-                              borderRadius: 999,
-                              fontSize: 12,
-                              fontWeight: 900,
-                              background: '#fff7ed',
-                              border: '1px solid #fdba74',
-                              color: '#9a3412',
-                            }}
-                          >
-                            예비
-                          </span>
-                        ) : null}
-                        <span style={{ fontWeight: 900 }}>{a.company_name}</span>
-                      </span>
-                    </td>
-                  </tr>
-                );
-              })}
-
-              {myApplies.length === 0 && (
-                <tr>
-                  <td colSpan={4} style={{ padding: 12, color: '#64748b', fontWeight: 800 }}>
-                    지원 내역이 없습니다.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+          <div style={{ display: 'grid', gap: 14, padding: isMobile ? 12 : 16 }}>
+            {renderMyApplySection('정상 등록', normalMyApplies, 'normal', '정상 등록 내역이 없습니다.')}
+            {renderMyApplySection('등록 제외', excludedMyApplies, 'excluded', '제외 처리된 내역이 없습니다.')}
+            {renderMyApplySection('예비 리스트', reserveMyApplies, 'reserve', '예비 등록 내역이 없습니다.')}
           </div>
         </div>
 

@@ -185,6 +185,7 @@ export function toLeaderApplyRow<T extends {
   company_name: string;
   meeting_time_slot: MeetingTimeSlot | null;
   is_reserve: boolean;
+  is_excluded: boolean;
 }>(row?: Partial<ApplicationRealtimeRow> | null): T | null {
   if (!row?.id || !row.created_at || !row.region_id) return null;
   return {
@@ -195,6 +196,7 @@ export function toLeaderApplyRow<T extends {
     company_name: String(row.company_name ?? ''),
     meeting_time_slot: normalizeMeetingTimeSlot(row.meeting_time_slot),
     is_reserve: Boolean(row.is_reserve),
+    is_excluded: Boolean(row.is_excluded),
   } as T;
 }
 
