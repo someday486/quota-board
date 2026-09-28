@@ -41,6 +41,12 @@ type ProfileRow = {
   leader_group?: number | null;
 };
 
+const REALTIME_RETRY_MAX_MS = 30_000;
+const REALTIME_CATCH_UP_DELAY_MS = 3_000;
+const REALTIME_STABLE_RESET_MS = 30_000;
+const REALTIME_VISIBILITY_SYNC_STALE_MS = 5 * 60 * 1000;
+const REALTIME_HEALTH_CHECK_MS = 60 * 1000;
+
 export function useAdminPage({
   setAdminUserId,
   setAdminName,
@@ -70,7 +76,9 @@ export function useAdminPage({
     let ch: ReturnType<typeof supabase.channel> | null = null;
 
     let retryTimer: number | null = null;
-    let pollTimer: number | null = null;
+    let catchUpTimer: number | null = null;
+    let stableTimer: number | null = null;
+    let healthTimer: number | null = null;
     let onVis: (() => void) | null = null;
     let liveRefreshTimer: number | null = null;
     let needsRegions = false;
@@ -78,6 +86,11 @@ export function useAdminPage({
     let needsApplies = false;
     let needsTodayCounts = false;
     let reconnectAttempt = 0;
+    let channelGeneration = 0;
+    let realtimeConnected = false;
+    let hasConnectedOnce = false;
+    let lastSyncAt = 0;
+    let syncInFlight: Promise<void> | null = null;
 
     const flushLiveRefresh = () => {
       liveRefreshTimer = null;
@@ -160,6 +173,7 @@ export function useAdminPage({
         loadStatus(),
         loadApplies(),
       ]);
+      lastSyncAt = Date.now();
 
       if (!alive) return;
 
@@ -176,13 +190,69 @@ export function useAdminPage({
 
       if (!alive) return;
 
-      const resubscribe = () => {
+      const catchUpAfterReconnect = () => {
+        if (!alive) return Promise.resolve();
+        if (syncInFlight) return syncInFlight;
+
+        syncInFlight = Promise.allSettled([
+          loadRegions(),
+          loadStatus(),
+          loadApplies(),
+          loadTodayCounts(),
+          loadApplyLimit(),
+          loadExemptUserIds(),
+          loadActiveGroup(),
+        ])
+          .then(() => {
+            lastSyncAt = Date.now();
+          })
+          .finally(() => {
+            syncInFlight = null;
+          });
+
+        return syncInFlight;
+      };
+
+      const scheduleReconnect = (status: 'CLOSED' | 'TIMED_OUT' | 'CHANNEL_ERROR') => {
+        if (!alive || retryTimer !== null) return;
+
+        realtimeConnected = false;
+        if (catchUpTimer !== null) {
+          window.clearTimeout(catchUpTimer);
+          catchUpTimer = null;
+        }
+        if (stableTimer !== null) {
+          window.clearTimeout(stableTimer);
+          stableTimer = null;
+        }
+        setRealtimeState?.(status === 'CLOSED' ? 'disconnected' : 'reconnecting');
+        const baseDelayMs = Math.min(
+          REALTIME_RETRY_MAX_MS,
+          1000 * 2 ** Math.min(reconnectAttempt, 5),
+        );
+        const delayMs = baseDelayMs + Math.floor(Math.random() * 500);
+        reconnectAttempt += 1;
+        retryTimer = window.setTimeout(() => {
+          retryTimer = null;
+          resubscribe();
+        }, delayMs);
+      };
+
+      function resubscribe() {
         if (!alive) return;
 
-        if (ch) supabase.removeChannel(ch);
-        setRealtimeState?.(reconnectAttempt > 0 ? 'reconnecting' : 'connecting');
+        if (retryTimer !== null) {
+          window.clearTimeout(retryTimer);
+          retryTimer = null;
+        }
 
-        ch = supabase
+        const previousChannel = ch;
+        const generation = ++channelGeneration;
+        ch = null;
+        if (previousChannel) void supabase.removeChannel(previousChannel);
+        setRealtimeState?.(hasConnectedOnce ? 'reconnecting' : 'connecting');
+
+        const channel = supabase
           .channel(`admin-live-${Date.now()}`)
           .on('postgres_changes', { event: '*', schema: 'public', table: 'region_totals' }, (payload) => {
             if (onRegionTotalChange) {
@@ -233,44 +303,55 @@ export function useAdminPage({
             },
           )
           .subscribe((status) => {
+            if (!alive || generation !== channelGeneration || ch !== channel) return;
+
             if (status === 'SUBSCRIBED') {
-              reconnectAttempt = 0;
+              const shouldCatchUp = hasConnectedOnce || reconnectAttempt > 0;
+              realtimeConnected = true;
+              hasConnectedOnce = true;
               setRealtimeState?.('connected');
+              if (shouldCatchUp) {
+                catchUpTimer = window.setTimeout(() => {
+                  catchUpTimer = null;
+                  if (alive && realtimeConnected && generation === channelGeneration && ch === channel) {
+                    void catchUpAfterReconnect();
+                  }
+                }, REALTIME_CATCH_UP_DELAY_MS);
+              }
+              stableTimer = window.setTimeout(() => {
+                stableTimer = null;
+                if (alive && realtimeConnected && generation === channelGeneration && ch === channel) {
+                  reconnectAttempt = 0;
+                }
+              }, REALTIME_STABLE_RESET_MS);
               return;
             }
             if (status === 'CLOSED' || status === 'TIMED_OUT' || status === 'CHANNEL_ERROR') {
-              setRealtimeState?.(status === 'CLOSED' ? 'disconnected' : 'reconnecting');
-              if (retryTimer) window.clearTimeout(retryTimer);
-              const delayMs = Math.min(30_000, 1000 * 2 ** reconnectAttempt);
-              reconnectAttempt += 1;
-              retryTimer = window.setTimeout(() => {
-                loadStatus();
-                loadApplies();
-                loadTodayCounts();
-                resubscribe();
-              }, delayMs);
+              scheduleReconnect(status);
             }
           });
-      };
+
+        ch = channel;
+      }
 
       resubscribe();
 
       onVis = () => {
         if (document.visibilityState === 'visible') {
-          loadStatus();
-          loadApplies();
-          loadTodayCounts();
+          if (!realtimeConnected) {
+            resubscribe();
+          } else if (Date.now() - lastSyncAt >= REALTIME_VISIBILITY_SYNC_STALE_MS) {
+            void catchUpAfterReconnect();
+          }
         }
       };
       document.addEventListener('visibilitychange', onVis);
 
-      pollTimer = window.setInterval(() => {
+      healthTimer = window.setInterval(() => {
         if (!alive) return;
         if (document.visibilityState !== 'visible') return;
-        loadStatus();
-        loadApplies();
-        loadTodayCounts();
-      }, 10 * 60 * 1000);
+        if (!realtimeConnected && retryTimer === null) resubscribe();
+      }, REALTIME_HEALTH_CHECK_MS);
 
     };
 
@@ -278,9 +359,13 @@ export function useAdminPage({
 
     return () => {
       alive = false;
-      if (ch) supabase.removeChannel(ch);
+      channelGeneration += 1;
+      if (ch) void supabase.removeChannel(ch);
+      ch = null;
       if (retryTimer) window.clearTimeout(retryTimer);
-      if (pollTimer) window.clearInterval(pollTimer);
+      if (catchUpTimer) window.clearTimeout(catchUpTimer);
+      if (stableTimer) window.clearTimeout(stableTimer);
+      if (healthTimer) window.clearInterval(healthTimer);
       if (liveRefreshTimer) window.clearTimeout(liveRefreshTimer);
       if (onVis) document.removeEventListener('visibilitychange', onVis);
     };

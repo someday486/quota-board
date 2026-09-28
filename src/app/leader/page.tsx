@@ -59,10 +59,7 @@ type ProfileRow = {
 
 type AppSettingRow = {
   key: string;
-  value_int: number;
-};
-
-type AppSettingJsonRow = {
+  value_int?: number | null;
   value_json: unknown;
 };
 
@@ -71,8 +68,26 @@ type InsertedApplyRow = {
   created_at?: string | null;
 };
 
+type ApplyLiveRegionResult = {
+  status?: string;
+  application_id?: string | null;
+  created_at?: string | null;
+};
+
+type LeaderDashboardBootstrap = {
+  status?: string;
+  profile?: ProfileRow | null;
+  regions?: RegionRow[] | null;
+  region_status?: RegionStatusRow[] | null;
+  settings?: AppSettingRow[] | null;
+  my_applications?: MyApplyRow[] | null;
+  my_today_count?: number | null;
+};
+
 type RealtimeSettingRow = {
   key?: string | null;
+  value_int?: number | null;
+  value_json?: unknown;
 };
 
 const REGION_COLOR: Record<string, string> = {
@@ -88,6 +103,27 @@ const REGION_COLOR: Record<string, string> = {
 const LIMIT_SETTING_KEY = 'apply_limit_per_user_per_day';
 const EXEMPT_SETTING_KEY = 'apply_limit_exempt_user_ids';
 const GROUP_SETTING_KEY = 'active_leader_group'; // 0=전체, 1=1조, 2=2조
+const REALTIME_RETRY_MAX_MS = 30_000;
+const REALTIME_CATCH_UP_DELAY_MS = 3_000;
+const REALTIME_STABLE_RESET_MS = 30_000;
+const REALTIME_VISIBILITY_SYNC_STALE_MS = 5 * 60 * 1000;
+const REALTIME_HEALTH_CHECK_MS = 60 * 1000;
+
+function parseRpcObject<T>(value: unknown): T | null {
+  if (value && typeof value === 'object') return value as T;
+  if (typeof value !== 'string') return null;
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return parsed && typeof parsed === 'object' ? (parsed as T) : null;
+  } catch {
+    return null;
+  }
+}
+
+function isMissingRpcError(error: { code?: string; message?: string } | null) {
+  if (!error) return false;
+  return error.code === 'PGRST202' || /could not find the function/i.test(error.message ?? '');
+}
 
 function timeSlotLabel(slot?: MeetingTimeSlot | null) {
   if (slot === 'am') return '오전';
@@ -323,65 +359,32 @@ export default function LeaderPage() {
     setMyApplies((data as MyApplyRow[]) ?? []);
   };
 
-  const loadLimit = async () => {
-    const { data, error } = await supabase
-      .from('app_settings')
-      .select('key, value_int')
-      .eq('key', LIMIT_SETTING_KEY)
-      .maybeSingle();
+  const applySettingsRows = (rows: AppSettingRow[]) => {
+    const limitRow = rows.find((row) => row.key === LIMIT_SETTING_KEY);
+    const exemptRow = rows.find((row) => row.key === EXEMPT_SETTING_KEY);
+    const groupRow = rows.find((row) => row.key === GROUP_SETTING_KEY);
 
-    if (error) {
-      console.warn('[loadLimit] error:', error.message);
-      return;
-    }
-
-    if (!data) {
-      setPerPersonLimit(0);
-      return;
-    }
-
-    const row = data as AppSettingRow;
-    setPerPersonLimit(Number(row.value_int ?? 0));
-  };
-
-  const loadExempt = async () => {
-    const { data, error } = await supabase
-      .from('app_settings')
-      .select('value_json')
-      .eq('key', EXEMPT_SETTING_KEY)
-      .maybeSingle();
-
-    if (error) {
-      console.warn('[loadExempt] error:', error.message);
-      return;
-    }
-
-    const raw = (data as AppSettingJsonRow | null)?.value_json;
+    setPerPersonLimit(Number(limitRow?.value_int ?? 0));
+    const raw = exemptRow?.value_json;
     const arr = Array.isArray(raw) ? raw : [];
     setExemptUserIds(arr.map(String));
-  };
-
-  const loadActiveGroup = async () => {
-    const { data, error } = await supabase
-      .from('app_settings')
-      .select('key, value_int')
-      .eq('key', GROUP_SETTING_KEY)
-      .maybeSingle();
-
-    if (error) {
-      console.warn('[loadActiveGroup] error:', error.message);
-      return;
-    }
-
-    if (!data) {
-      setActiveGroup(0);
-      return;
-    }
-
-    const row = data as AppSettingRow;
-    const v = Number(row.value_int ?? 0);
+    const v = Number(groupRow?.value_int ?? 0);
     const safe = Number.isFinite(v) ? Math.max(0, Math.min(2, Math.trunc(v))) : 0;
     setActiveGroup(safe);
+  };
+
+  const loadSettings = async () => {
+    const { data, error } = await supabase
+      .from('app_settings')
+      .select('key, value_int, value_json')
+      .in('key', [LIMIT_SETTING_KEY, EXEMPT_SETTING_KEY, GROUP_SETTING_KEY]);
+
+    if (error) {
+      console.warn('[loadSettings] error:', error.message);
+      return;
+    }
+
+    applySettingsRows((data as AppSettingRow[] | null) ?? []);
   };
 
 
@@ -424,6 +427,47 @@ export default function LeaderPage() {
     setMyGroup(row.leader_group ?? null);
     setInvalidCallCount(Number(row.invalid_call_count ?? 0));
     setRestrictedUntil(row.participation_restricted_until ?? null);
+  };
+
+  const loadDashboardBootstrap = async (): Promise<LeaderDashboardBootstrap | null> => {
+    const { data, error } = await supabase.rpc('get_leader_dashboard_bootstrap');
+    if (error) {
+      if (!isMissingRpcError(error)) console.warn('[leader bootstrap] error:', error.message);
+      return null;
+    }
+
+    const result = parseRpcObject<LeaderDashboardBootstrap>(data);
+    if (!result || result.status !== 'SUCCESS' || !result.profile) return null;
+
+    const regions = result.regions ?? [];
+    const regionMap = new Map<string, RegionRow>();
+    for (const region of regions) regionMap.set(region.id, region);
+    setRegionsMap(regionMap);
+
+    const statuses = result.region_status ?? [];
+    setStatusRows(statuses);
+    setCompanyByRegionId((prev) => {
+      const next = { ...prev };
+      for (const row of statuses) if (next[row.region_id] === undefined) next[row.region_id] = '';
+      return next;
+    });
+    setTimeSlotByRegionId((prev) => {
+      const next = { ...prev };
+      for (const row of statuses) if (next[row.region_id] === undefined) next[row.region_id] = '';
+      return next;
+    });
+
+    applySettingsRows(result.settings ?? []);
+    setMyApplies(result.my_applications ?? []);
+    setMyTodayCount(Number(result.my_today_count ?? 0));
+
+    const profile = result.profile;
+    setLeaderName(profile.display_name ?? '팀장');
+    setMyGroup(profile.leader_group ?? null);
+    setInvalidCallCount(Number(profile.invalid_call_count ?? 0));
+    setRestrictedUntil(profile.participation_restricted_until ?? null);
+
+    return result;
   };
 
   const patchMyApplicationPayload = (payload: RealtimePayload<ApplicationRealtimeRow>, uid: string) => {
@@ -690,10 +734,23 @@ export default function LeaderPage() {
 
     setBusyRegionId(regionId);
 
-    const { data, error } = await supabase.rpc('apply_live_region', {
+    let usedLegacyRpc = false;
+    let { data, error } = await supabase.rpc('apply_live_region_v2', {
       p_region_id: regionId,
       p_company_name: c,
+      p_meeting_time_slot: timeSlot,
     });
+
+    // Keep deployments safe while the database migration and web release roll out.
+    if (error && isMissingRpcError(error)) {
+      usedLegacyRpc = true;
+      const legacyResponse = await supabase.rpc('apply_live_region', {
+        p_region_id: regionId,
+        p_company_name: c,
+      });
+      data = legacyResponse.data;
+      error = legacyResponse.error;
+    }
 
     if (error) {
       failWithCompany(error.message);
@@ -701,16 +758,17 @@ export default function LeaderPage() {
       return;
     }
 
-    const result = String(data);
+    const rpcResult = parseRpcObject<ApplyLiveRegionResult>(data);
+    const result = rpcResult?.status ?? String(data);
 
     if (result === 'SUCCESS') {
       showToast('success', `${c} 지원 성공`);
       showRowNotice(regionId, { type: 'success', text: `${c} 지원 성공` });
       setCompanyByRegionId((prev) => ({ ...prev, [regionId]: '' }));
 
-      let newApplicationId: string | null = null;
-      let newAppliedAt: string | null = null;
-      if (myUserId) {
+      let newApplicationId = rpcResult?.application_id ?? null;
+      let newAppliedAt = rpcResult?.created_at ?? null;
+      if (usedLegacyRpc && myUserId) {
         const { data: latest } = await supabase
           .from('applications_live')
           .select('id, created_at')
@@ -725,7 +783,7 @@ export default function LeaderPage() {
         newAppliedAt = (latest as InsertedApplyRow | null)?.created_at ?? null;
       }
 
-      if (newApplicationId) {
+      if (usedLegacyRpc && newApplicationId) {
         try {
           await saveApplicationTimeSlot(newApplicationId, timeSlot);
         } catch (e: unknown) {
@@ -880,9 +938,17 @@ export default function LeaderPage() {
 
     // Realtime 끊김(절전/네트워크 전환 등) 대비: 재구독 타이머 + 현재 uid 보관
     let retryTimer: number | null = null;
-    let pollTimer: number | null = null;
+    let catchUpTimer: number | null = null;
+    let stableTimer: number | null = null;
+    let healthTimer: number | null = null;
     let uidRef: string | null = null;
     let onVis: (() => void) | null = null;
+    let channelGeneration = 0;
+    let reconnectAttempt = 0;
+    let realtimeConnected = false;
+    let hasConnectedOnce = false;
+    let lastSyncAt = 0;
+    let syncInFlight: Promise<void> | null = null;
 
     const boot = async () => {
       const { data: userRes, error: userErr } = await supabase.auth.getUser();
@@ -897,20 +963,27 @@ export default function LeaderPage() {
       setMyUserId(uid);
       uidRef = uid;
 
-      const { data: prof, error: profErr } = await supabase
-        .from('profiles')
-        .select('user_id, display_name, role, is_admin, leader_group, invalid_call_count, participation_restricted_until')
-        .eq('user_id', uid)
-        .maybeSingle();
+      const bundledDashboard = await loadDashboardBootstrap();
+      let p = bundledDashboard?.profile ?? null;
 
-      if (!alive) return;
+      if (!p) {
+        const { data: prof, error: profErr } = await supabase
+          .from('profiles')
+          .select('user_id, display_name, role, is_admin, leader_group, invalid_call_count, participation_restricted_until')
+          .eq('user_id', uid)
+          .maybeSingle();
 
-      if (profErr || !prof) {
-        router.replace('/login');
-        return;
+        if (!alive) return;
+
+        if (profErr || !prof) {
+          router.replace('/login');
+          return;
+        }
+
+        p = prof as ProfileRow;
       }
 
-      const p = prof as ProfileRow;
+      if (!alive) return;
 
       const admin = p.role === 'admin' || Boolean(p.is_admin);
       if (admin) {
@@ -928,19 +1001,79 @@ export default function LeaderPage() {
       setInvalidCallCount(Number(p.invalid_call_count ?? 0));
       setRestrictedUntil(p.participation_restricted_until ?? null);
 
-      await loadRegions();
-      await Promise.all([loadLimit(), loadExempt(), loadActiveGroup(), loadStatus(), loadMyApplies(uid), loadMyTodayCount(uid), loadMyProfile(uid)]);
+      if (!bundledDashboard) {
+        await loadRegions();
+        await Promise.all([loadSettings(), loadStatus(), loadMyApplies(uid), loadMyTodayCount(uid)]);
+      }
+      lastSyncAt = Date.now();
 
       if (!alive) return;
 
-      const resubscribe = () => {
+      const catchUpAfterReconnect = () => {
+        if (!alive || !uidRef) return Promise.resolve();
+        if (syncInFlight) return syncInFlight;
+
+        const currentUid = uidRef;
+        syncInFlight = (async () => {
+          const bundled = await loadDashboardBootstrap();
+          if (!bundled) {
+            await Promise.allSettled([
+              loadRegions(),
+              loadSettings(),
+              loadStatus(),
+              loadMyApplies(currentUid),
+              loadMyTodayCount(currentUid),
+              loadMyProfile(currentUid),
+            ]);
+          }
+          lastSyncAt = Date.now();
+        })().finally(() => {
+          syncInFlight = null;
+        });
+
+        return syncInFlight;
+      };
+
+      const scheduleReconnect = (status: 'CLOSED' | 'TIMED_OUT' | 'CHANNEL_ERROR') => {
+        if (!alive || retryTimer !== null) return;
+
+        realtimeConnected = false;
+        if (catchUpTimer !== null) {
+          window.clearTimeout(catchUpTimer);
+          catchUpTimer = null;
+        }
+        if (stableTimer !== null) {
+          window.clearTimeout(stableTimer);
+          stableTimer = null;
+        }
+        setRealtimeState(status === 'CLOSED' ? 'disconnected' : 'reconnecting');
+        const baseDelayMs = Math.min(
+          REALTIME_RETRY_MAX_MS,
+          1000 * 2 ** Math.min(reconnectAttempt, 5),
+        );
+        const delayMs = baseDelayMs + Math.floor(Math.random() * 500);
+        reconnectAttempt += 1;
+        retryTimer = window.setTimeout(() => {
+          retryTimer = null;
+          resubscribe();
+        }, delayMs);
+      };
+
+      function resubscribe() {
         if (!alive || !uidRef) return;
 
-        // 기존 채널 정리
-        if (ch) supabase.removeChannel(ch);
-        setRealtimeState((prev) => (prev === 'connected' ? 'reconnecting' : 'connecting'));
+        if (retryTimer !== null) {
+          window.clearTimeout(retryTimer);
+          retryTimer = null;
+        }
 
-        ch = supabase
+        const previousChannel = ch;
+        const generation = ++channelGeneration;
+        ch = null;
+        if (previousChannel) void supabase.removeChannel(previousChannel);
+        setRealtimeState(hasConnectedOnce ? 'reconnecting' : 'connecting');
+
+        const channel = supabase
           // 재구독 시 채널명 충돌 방지
           .channel(`leader-live-${Date.now()}`)
 
@@ -970,73 +1103,79 @@ export default function LeaderPage() {
             },
           )
 
-          // ✅ app_settings 구독은 "한 번만" 둡니다 (아래 중복 구독은 삭제할 예정)
           .on('postgres_changes', { event: '*', schema: 'public', table: 'app_settings' }, (payload) => {
-            const nk = ((payload?.new ?? null) as RealtimeSettingRow | null)?.key;
-            const ok = ((payload?.old ?? null) as RealtimeSettingRow | null)?.key;
+            const row = (payload?.new ?? payload?.old ?? null) as RealtimeSettingRow | null;
+            const isDelete = String(payload?.eventType ?? '').toUpperCase() === 'DELETE';
 
-            if (nk === LIMIT_SETTING_KEY || ok === LIMIT_SETTING_KEY) loadLimit();
-            if (nk === EXEMPT_SETTING_KEY || ok === EXEMPT_SETTING_KEY) loadExempt();
-            if (nk === GROUP_SETTING_KEY || ok === GROUP_SETTING_KEY) loadActiveGroup();
+            if (row?.key === LIMIT_SETTING_KEY) {
+              setPerPersonLimit(isDelete ? 0 : Number(row.value_int ?? 0));
+            }
+            if (row?.key === EXEMPT_SETTING_KEY) {
+              const raw = isDelete ? [] : row.value_json;
+              setExemptUserIds(Array.isArray(raw) ? raw.map(String) : []);
+            }
+            if (row?.key === GROUP_SETTING_KEY) {
+              const value = isDelete ? 0 : Number(row.value_int ?? 0);
+              const safe = Number.isFinite(value) ? Math.max(0, Math.min(2, Math.trunc(value))) : 0;
+              setActiveGroup(safe);
+            }
           })
 
           .subscribe((status) => {
-            // 정상 상태
+            if (!alive || generation !== channelGeneration || ch !== channel) return;
+
             if (status === 'SUBSCRIBED') {
+              const shouldCatchUp = hasConnectedOnce || reconnectAttempt > 0;
+              realtimeConnected = true;
               setRealtimeState('connected');
+              hasConnectedOnce = true;
+              if (shouldCatchUp) {
+                catchUpTimer = window.setTimeout(() => {
+                  catchUpTimer = null;
+                  if (alive && realtimeConnected && generation === channelGeneration && ch === channel) {
+                    void catchUpAfterReconnect();
+                  }
+                }, REALTIME_CATCH_UP_DELAY_MS);
+              }
+              stableTimer = window.setTimeout(() => {
+                stableTimer = null;
+                if (alive && realtimeConnected && generation === channelGeneration && ch === channel) {
+                  reconnectAttempt = 0;
+                }
+              }, REALTIME_STABLE_RESET_MS);
               return;
             }
 
-            // 끊김/에러면 자동 재구독
             if (status === 'CLOSED' || status === 'TIMED_OUT' || status === 'CHANNEL_ERROR') {
-              setRealtimeState(status === 'CLOSED' ? 'disconnected' : 'reconnecting');
-              if (retryTimer) window.clearTimeout(retryTimer);
-              retryTimer = window.setTimeout(() => {
-                // 놓친 이벤트 보정: 재구독 직후 한번 강제 동기화
-                loadLimit();
-                loadExempt();
-                loadActiveGroup();
-                loadStatus();
-                loadMyApplies(uidRef!);
-                loadMyTodayCount(uidRef!);
-                loadMyProfile(uidRef!);
-
-                resubscribe();
-              }, 1000);
+              scheduleReconnect(status);
             }
           });
-      };
+
+        ch = channel;
+      }
 
       // 최초 1회 구독
       resubscribe();
 
-      // 탭이 오래 백그라운드/절전이었다가 돌아오는 경우 놓친 변경 보정
+      // 오래 숨겨졌던 탭만 한 번 보정하고, 연결이 끊겼다면 즉시 재구독을 시도한다.
       onVis = () => {
         if (!alive) return;
         if (document.visibilityState === 'visible') {
-          loadLimit();
-          loadExempt();
-          loadActiveGroup();
-          loadStatus();
-          if (uidRef) {
-            loadMyApplies(uidRef);
-            loadMyTodayCount(uidRef);
-            loadMyProfile(uidRef);
+          if (!realtimeConnected) {
+            resubscribe();
+          } else if (Date.now() - lastSyncAt >= REALTIME_VISIBILITY_SYNC_STALE_MS) {
+            void catchUpAfterReconnect();
           }
         }
       };
       if (onVis) document.addEventListener('visibilitychange', onVis);
 
-      // Realtime이 잠깐 죽어도 정합성 유지용 백업 폴링(30초)
-      pollTimer = window.setInterval(() => {
+      // 데이터 폴링 없이 연결 상태만 복구한다. 데이터 보정은 재연결 성공 후 한 번 실행한다.
+      healthTimer = window.setInterval(() => {
         if (!alive) return;
         if (document.visibilityState !== 'visible') return;
-        loadStatus();
-        if (uidRef) {
-          loadMyApplies(uidRef);
-          loadMyTodayCount(uidRef);
-        }
-      }, 10 * 60 * 1000);
+        if (!realtimeConnected && retryTimer === null) resubscribe();
+      }, REALTIME_HEALTH_CHECK_MS);
 
       setChecking(false);
 
@@ -1046,9 +1185,13 @@ export default function LeaderPage() {
 
     return () => {
       alive = false;
-      if (ch) supabase.removeChannel(ch);
+      channelGeneration += 1;
+      if (ch) void supabase.removeChannel(ch);
+      ch = null;
       if (retryTimer) window.clearTimeout(retryTimer);
-      if (pollTimer) window.clearInterval(pollTimer);
+      if (catchUpTimer) window.clearTimeout(catchUpTimer);
+      if (stableTimer) window.clearTimeout(stableTimer);
+      if (healthTimer) window.clearInterval(healthTimer);
       if (onVis) document.removeEventListener('visibilitychange', onVis);
       if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
       Object.values(rowNoticeTimersRef.current).forEach((timer) => window.clearTimeout(timer));
