@@ -1,4 +1,5 @@
 import KoreanLunarCalendar from 'korean-lunar-calendar';
+import { addDaysLocal, isWeekend } from '@/lib/leaveHolidays';
 
 export type BirthdayEvent = {
   id: string;
@@ -14,6 +15,11 @@ export type BirthdayProfile = {
   email: string | null;
   display_name: string | null;
   resigned_at: string | null;
+};
+
+export type BirthdayNoticeGroup = {
+  date: string;
+  names: string[];
 };
 
 function buildAnnualDate(targetYear: number, originalDate: string) {
@@ -104,7 +110,36 @@ export function birthdayNamesForDate(
   return [...names].sort((a, b) => a.localeCompare(b, 'ko'));
 }
 
-export function buildBirthdayMessage(names: string[]) {
-  const people = names.map((name) => `${name}님`).join(', ');
-  return `[생일 알림]\n오늘은 ${people}의 생일입니다. 모두 함께 축하해 주세요!`;
+export function birthdayNoticeDatesForBusinessDay(today: string, holidayDates: ReadonlySet<string>) {
+  if (isWeekend(today) || holidayDates.has(today)) return [];
+
+  const dates = [today];
+  let cursor = addDaysLocal(today, 1);
+  while (isWeekend(cursor) || holidayDates.has(cursor)) {
+    dates.push(cursor);
+    cursor = addDaysLocal(cursor, 1);
+  }
+  return dates;
+}
+
+function birthdayDateLabel(date: string) {
+  const parsed = new Date(`${date}T00:00:00+09:00`);
+  const weekday = new Intl.DateTimeFormat('ko-KR', {
+    timeZone: 'Asia/Seoul',
+    weekday: 'short',
+  }).format(parsed);
+  return `${Number(date.slice(5, 7))}월 ${Number(date.slice(8, 10))}일(${weekday})`;
+}
+
+export function buildBirthdayMessage(groups: BirthdayNoticeGroup[], runDate: string) {
+  if (groups.length === 1 && groups[0].date === runDate) {
+    const people = groups[0].names.map((name) => `${name}님`).join(', ');
+    return `[생일 알림]\n오늘은 ${people}의 생일입니다. 모두 함께 축하해 주세요!`;
+  }
+
+  const lines = groups.map((group) => {
+    const people = group.names.map((name) => `${name}님`).join(', ');
+    return `- ${birthdayDateLabel(group.date)}: ${people}`;
+  });
+  return `[생일 알림]\n주말·공휴일 생일을 미리 안내드립니다.\n${lines.join('\n')}\n모두 함께 축하해 주세요!`;
 }

@@ -2,11 +2,18 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import {
   BirthdayEvent,
+  BirthdayNoticeGroup,
   BirthdayProfile,
+  birthdayNoticeDatesForBusinessDay,
   birthdayNamesForDate,
   buildBirthdayMessage,
   seoulDate,
 } from '@/lib/birthdayNotification';
+import {
+  HolidayOverrideRow,
+  addDaysLocal,
+  getHolidayDateSetBetween,
+} from '@/lib/leaveHolidays';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -15,7 +22,17 @@ type NotificationSetting = {
   value_json: unknown;
 };
 
+type PreviousNotification = {
+  date?: unknown;
+  covered_through?: unknown;
+};
+
 const LAST_SENT_SETTING_KEY = 'birthday_notice_last_sent';
+
+function isMissingHolidayOverridesTableError(error: { message?: string; code?: string } | null) {
+  const text = `${error?.code ?? ''} ${error?.message ?? ''}`;
+  return /42P01|PGRST/i.test(text) && /leave_holiday_overrides|does not exist|schema cache/i.test(text);
+}
 
 function isAuthorized(req: NextRequest) {
   const secret = process.env.CRON_SECRET;
@@ -55,17 +72,47 @@ export async function GET(req: NextRequest) {
       auth: { persistSession: false, autoRefreshToken: false },
     });
 
-    const { data: previous, error: previousError } = await supabase
-      .from('app_settings')
-      .select('value_json')
-      .eq('key', LAST_SENT_SETTING_KEY)
-      .maybeSingle();
+    const holidayRangeEnd = addDaysLocal(today, 31);
+    const [previousResult, overridesResult] = await Promise.all([
+      supabase
+        .from('app_settings')
+        .select('value_json')
+        .eq('key', LAST_SENT_SETTING_KEY)
+        .maybeSingle(),
+      supabase
+        .from('leave_holiday_overrides')
+        .select('holiday_date,name,is_holiday')
+        .gte('holiday_date', today)
+        .lte('holiday_date', holidayRangeEnd),
+    ]);
+
+    const { data: previous, error: previousError } = previousResult;
     if (previousError) throw new Error(previousError.message);
+    if (overridesResult.error && !isMissingHolidayOverridesTableError(overridesResult.error)) {
+      throw new Error(overridesResult.error.message);
+    }
+
+    const overrides = overridesResult.error
+      ? []
+      : ((overridesResult.data ?? []) as HolidayOverrideRow[]);
+    const holidayDates = getHolidayDateSetBetween(today, holidayRangeEnd, overrides);
+    const noticeDates = birthdayNoticeDatesForBusinessDay(today, holidayDates);
+    if (noticeDates.length === 0) {
+      return NextResponse.json({ ok: true, status: 'non_business_day', date: today });
+    }
+
     const previousValue = (previous as NotificationSetting | null)?.value_json;
-    const previousDate = previousValue && typeof previousValue === 'object' && 'date' in previousValue
-      ? String(previousValue.date)
+    const previousNotice = previousValue && typeof previousValue === 'object'
+      ? previousValue as PreviousNotification
       : null;
-    if (previousDate === today) {
+    const previousDate = previousNotice?.date ? String(previousNotice.date) : null;
+    const coveredThrough = previousDate === today
+      ? String(previousNotice?.covered_through ?? today)
+      : null;
+    const pendingDates = coveredThrough
+      ? noticeDates.filter((date) => date > coveredThrough)
+      : noticeDates;
+    if (pendingDates.length === 0) {
       return NextResponse.json({ ok: true, status: 'already_sent', date: today });
     }
 
@@ -79,28 +126,42 @@ export async function GET(req: NextRequest) {
     if (eventsResult.error) throw new Error(eventsResult.error.message);
     if (profilesResult.error) throw new Error(profilesResult.error.message);
 
-    const names = birthdayNamesForDate(
-      (eventsResult.data ?? []) as BirthdayEvent[],
-      (profilesResult.data ?? []) as BirthdayProfile[],
-      today,
-    );
-    if (names.length === 0) {
-      return NextResponse.json({ ok: true, status: 'no_birthdays', date: today });
+    const events = (eventsResult.data ?? []) as BirthdayEvent[];
+    const profiles = (profilesResult.data ?? []) as BirthdayProfile[];
+    const groups = pendingDates.reduce<BirthdayNoticeGroup[]>((rows, date) => {
+      const names = birthdayNamesForDate(events, profiles, date);
+      if (names.length > 0) rows.push({ date, names });
+      return rows;
+    }, []);
+    if (groups.length === 0) {
+      return NextResponse.json({ ok: true, status: 'no_birthdays', date: today, checkedThrough: pendingDates.at(-1) });
     }
 
-    const content = buildBirthdayMessage(names);
+    const content = buildBirthdayMessage(groups, today);
     await sendTeamroomMessage(webhookUrl, content);
 
+    const recipientCount = groups.reduce((count, group) => count + group.names.length, 0);
     const { error: logError } = await supabase.from('app_settings').upsert(
       {
         key: LAST_SENT_SETTING_KEY,
-        value_json: { date: today, recipient_count: names.length, sent_at: new Date().toISOString() },
+        value_json: {
+          date: today,
+          covered_through: noticeDates.at(-1),
+          recipient_count: recipientCount,
+          sent_at: new Date().toISOString(),
+        },
       },
       { onConflict: 'key' },
     );
     if (logError) throw new Error(logError.message);
 
-    return NextResponse.json({ ok: true, status: 'sent', date: today, recipients: names.length });
+    return NextResponse.json({
+      ok: true,
+      status: 'sent',
+      date: today,
+      coveredThrough: noticeDates.at(-1),
+      recipients: recipientCount,
+    });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Unknown birthday notification error';
     console.error('[birthday-notice]', message);
